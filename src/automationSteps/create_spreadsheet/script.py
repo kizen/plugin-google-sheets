@@ -58,7 +58,7 @@ def check_sheets_response(resp, context):
     return body
 
 
-name = inputs.name
+spreadsheet_name = inputs.spreadsheet_name
 template_spreadsheet_id = getattr(inputs, "template_spreadsheet_id", None)
 header_row_values_raw = getattr(inputs, "header_row_values", None)
 folder_id = getattr(inputs, "folder_id", None)
@@ -82,7 +82,7 @@ if header_row_values_raw:
         raise Exception(f"header_row_values must be a JSON array (e.g. [\"Name\", \"Email\"]), got: {header_row_values_raw}")
 
 body = check_sheets_response(
-    kizen.api.post(f"{BASE_URL}/v4/spreadsheets", json={"properties": {"title": name}}),
+    kizen.api.post(f"{BASE_URL}/v4/spreadsheets", json={"properties": {"title": spreadsheet_name}}),
     "creating spreadsheet",
 )
 
