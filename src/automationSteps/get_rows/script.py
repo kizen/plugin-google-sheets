@@ -41,6 +41,16 @@ sheet_name = inputs.sheet_name
 filter_column = getattr(inputs, "filter_column", None)
 filter_value = getattr(inputs, "filter_value", None)
 
+header_row_input = getattr(inputs, "header_row", None)
+header_row = int(header_row_input) if header_row_input is not None else 1
+if header_row < 1:
+    raise Exception(f"header_row must be 1 or greater, got {header_row}.")
+
+header_column_input = getattr(inputs, "header_column", None)
+header_column = int(header_column_input) if header_column_input is not None else 1
+if header_column < 1:
+    raise Exception(f"header_column must be 1 or greater, got {header_column}.")
+
 if filter_column and not filter_value:
     raise Exception("filter_value is required when filter_column is set.")
 
@@ -63,8 +73,15 @@ if not values:
     outputs.rows = json.dumps([])
     outputs.row_count = 0
 else:
-    headers = values[0]
-    data_rows = values[1:]
+    if header_row > len(values):
+        raise Exception(f"header_row {header_row} exceeds sheet '{sheet_name}' row count ({len(values)}).")
+
+    header_row_values = values[header_row - 1]
+    if header_column > len(header_row_values):
+        raise Exception(f"header_column {header_column} exceeds header row's column count ({len(header_row_values)}) in sheet '{sheet_name}'.")
+
+    headers = header_row_values[header_column - 1:]
+    data_rows = [row[header_column - 1:] for row in values[header_row:]]
 
     if filter_column and filter_column not in headers:
         raise Exception(f"filter_column '{filter_column}' is not a header in sheet '{sheet_name}'. Headers: {headers}")

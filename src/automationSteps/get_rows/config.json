@@ -25,6 +25,26 @@
       "script_alias": "sheet_name"
     },
     {
+      "name": "header_row",
+      "label": "Header Row",
+      "hint": "Which row contains the column headers (1-indexed).",
+      "data_type": "number",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "header_row",
+      "default": 1
+    },
+    {
+      "name": "header_column",
+      "label": "Header Column",
+      "hint": "Which column the headers start in (1-indexed). Columns to the left are skipped entirely, e.g. a leading row-label column.",
+      "data_type": "number",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "header_column",
+      "default": 1
+    },
+    {
       "name": "filter_column",
       "label": "Filter Column",
       "hint": "Header name of the column to filter on. Leave blank to return every row.",

@@ -49,7 +49,7 @@ Everything else is not yet started.
 
 `{plugin_api_name}` is `google_sheets` only once this plugin is merged and published. While testing an unmerged PR, Kizen deploys it under `{api_name}_preview_{branch_name_slugified}` instead — using the plain name 404s every proxy call. This cost Drive a full debugging session; check the PR's `plugin-wizard` bot comment ("App Preview Deployment Report") for the current preview name before testing.
 
-The proxy appends the path after `shared` to `base_service_url` (`https://www.googleapis.com`), so `sheets/v4/spreadsheets/{id}/values/{range}` resolves to `https://www.googleapis.com/sheets/v4/spreadsheets/{id}/values/{range}`.
+The proxy appends the path after `shared` to `base_service_url`. **Unlike Drive (`https://www.googleapis.com` + `drive/v3/...`), Sheets must use `base_service_url: "https://sheets.googleapis.com"` + `v4/spreadsheets/{id}/values/{range}`** — the Sheets API isn't reachable under the generic `www.googleapis.com/sheets/v4/...` path the way Drive's API is under `www.googleapis.com/drive/v3/...`; that combination returns Google's generic branded HTML 404, not a Sheets API error. Confirmed directly with `curl` and by a live failed run — see the `get_rows` section below for the full story.
 
 ---
 
@@ -81,6 +81,8 @@ Kizen's proxy wraps every successful upstream JSON response in an envelope — `
 | --- | --- | --- | --- |
 | `spreadsheet_id` | string | yes | From the sheet's URL. |
 | `sheet_name` | string | yes | The tab name, e.g. `Sheet1`. Quoted in A1 notation unconditionally (handles spaces/special characters without guessing whether quoting is needed). |
+| `header_row` | number | yes | 1-indexed row containing headers. `required: true` with `default: 1` — **not optional**, because this framework's runtime coerces every input to its declared `data_type` unconditionally, even when unset; an optional `number` input left blank arrives as `''` and crashes on `float('')` *before the script ever runs* (confirmed live — see below). `string` inputs don't have this problem (`str('')` is fine), which is why `filter_column`/`filter_value` stay `required: false`. Rows above `header_row` are ignored entirely (not returned as data). |
+| `header_column` | number | yes | 1-indexed column the headers start in. Same `required: true` + `default: 1` shape as `header_row`, for the same reason. Columns to the left are dropped entirely from both headers and every data row — e.g. a leading row-label/index column. |
 | `filter_column` | string | no | Header name to filter on. |
 | `filter_value` | string | no | Required if `filter_column` is set; exact-match only. |
 
@@ -89,11 +91,18 @@ Kizen's proxy wraps every successful upstream JSON response in an envelope — `
 | `rows` | string | JSON array string of row objects keyed by header name — the "JSON array string" convention used everywhere in this workspace since the framework has no native list/array `data_type` (see Drive's `matching_files`). |
 | `row_count` | number | |
 
-**Resolves by header name, not raw A1 notation**, per the ticket's ask: fetches the whole sheet via `values.get` (no cell range, just the sheet name), treats row 1 as headers, and zips each subsequent row against those headers. A row shorter than the header count (Sheets omits trailing empty cells) gets `""` for the missing trailing columns.
+**Resolves by header name, not raw A1 notation**, per the ticket's ask: fetches the whole sheet via `values.get` (no cell range, just the sheet name), treats `header_row`/`header_column` (both default `1`) as the top-left corner of the real table, and zips each row below/right of that corner against the header names found there. A row shorter than the header count (Sheets omits trailing empty cells) gets `""` for the missing trailing columns. Rows above `header_row` and columns left of `header_column` (e.g. a title/banner row, or a row-label column) are dropped entirely, never returned as data. If either is beyond the sheet's actual dimensions, raises a clear error rather than an `IndexError`.
 
-**Not yet tested against a real staging sheet** — built and internally consistent with the Drive plugin's proven patterns (proxy envelope unwrapping, error shape, `getattr` for optional inputs), but no live run yet. Next step before calling this action done.
+**Confirmed working end-to-end** against a real staging test sheet (3 rows, `Name`/`Email`/`Status` headers) — correct header-keyed JSON and `row_count`. Two real bugs surfaced getting there, both fixed:
 
-**Untested assumption:** `values.get` without `valueRenderOption` returns `FORMATTED_VALUE` (what a user sees in the sheet UI — e.g. dates/currency formatted as strings), not raw underlying values. Worth confirming this is the desired default before Search Rows/Update Row build on the same assumption.
+1. **`base_service_url` must be `https://sheets.googleapis.com`, not `https://www.googleapis.com`** — unlike Drive's `drive/v3`, the Sheets API is *not* reachable under the generic `www.googleapis.com/sheets/v4/...` path. Hitting that path/host combo returns Google's generic branded HTML 404 page (`Error 404 (Not Found)!!1`, robot.png), not a Sheets API JSON error — confirmed directly with `curl`. `kizen.json`'s `base_service_url` is now `https://sheets.googleapis.com` and `script.py`'s path drops the `sheets/` prefix (`v4/spreadsheets/{id}/values/{range}`).
+2. **Error detection must check the wrapped upstream `status_code`, not just `resp.ok`.** Kizen's proxy returns its own HTTP 200 even when the upstream call itself failed (e.g. the 404 above) — `resp.ok` only reflects proxy-level success. The original error handling only checked `resp.ok`, so a non-JSON upstream error body (the HTML page above) crashed with an opaque `AttributeError: 'str' object has no attribute 'get'` instead of a clean message. Fixed by also checking `payload.get("status_code")` and guarding with `isinstance(body, dict)` before treating it as JSON.
+
+Also confirmed live: publishing an app is required before it can be installed into a business for testing (`Install Plugin` fails with "App not published" otherwise), and while a PR is open the OAuth consent screen must have both the target Google account added to **Test users** and the exact scopes (`spreadsheets.readonly`, `userinfo.email`, `userinfo.profile`) added to the consent screen's own scope list — declaring them in `kizen.json` alone isn't enough.
+
+**Framework gotcha found while adding `header_row`:** an optional (`required: false`) input of `data_type: "number"` crashes the whole run with `KizenConversionError: Failed to convert value '' to float` *before* `script.py` executes at all, whenever the field is left blank — the runtime's `kznvar_to_pyvar` unconditionally calls `float(v)` on the raw value regardless of whether the input is required. This doesn't affect `string` inputs (`str('')` succeeds). **Tried adding `"default": 1` while keeping `required: false`, hoping the platform would substitute the default for a blank field — same crash, byte-for-byte.** `default` only works as a UI pre-fill tied to `required: true`; it does not make the runtime substitute a value for a truly optional field left blank. The only working fix: make numeric optional-in-spirit inputs `required: true` with a `"default"` value instead (precedent: `plugin-mysql`'s `mysql_read.return_single_value`) — the platform pre-fills the field in the UI so it's never actually sent blank. Any future numeric input on this plugin (e.g. a page-size input) should follow this pattern, not `required: false`.
+
+**Confirmed live:** `values.get` without `valueRenderOption` returns `FORMATTED_VALUE` (what a user sees in the sheet UI), not raw underlying values — a `Birth Date` column came back as `"11/19/1990"` (a display string), not a raw date serial number. Worth keeping in mind before Search Rows/Update Row build on the same default.
 
 ---
 
