@@ -1,20 +1,20 @@
 # Google Sheets Plugin — Developer Context
 
-Reads, searches, and writes rows in Google Sheets from Kizen agentic workflows, using a single business-level OAuth connection. This is a spike (KZN-18007) — every action is a plain data-fetch/write primitive against the Sheets API, deliberately with no summarization/extraction (that belongs in existing LLM action steps, not here).
+Reads, searches, and writes rows in Google Sheets from Kizen agentic workflows via a single business-level OAuth connection. This is spike KZN-18007. Every action is a plain data-fetch/write primitive against the Sheets API — no summarization or extraction, which belongs in existing LLM action steps.
 
 ---
 
-## What This Plugin Does (v1 target)
+## What This Plugin Does (v1)
 
-Per the spike ticket, the full v1 surface is: Get Rows / Read Range, Search Rows, Append Row, Update Row/Cell, Create Spreadsheet/Tab, and (if feasible) a New Row Added trigger. Built incrementally, one action at a time.
+Per the spike ticket: Get Rows / Read Range, Search Rows, Append Row, Update Row/Cell, Create Spreadsheet/Tab, and (if feasible) a New Row Added trigger.
 
-1. **Get Rows / Read Range** — fetches rows from a sheet, keyed by header name, with optional single-column filtering. **Built.**
-2. **Search Rows** — finds row(s) by exact column value, returning both the matching rows and their real sheet row numbers (for a subsequent Update Row). **Built.**
-3. **Append Row** — adds a new row to the end of a sheet, keyed by header name via a single JSON-object input (no dynamic per-column inputs — see below). **Built.**
-4. **Update Row/Cell** — updates specific cells within one row, targeted by `row_number` or by `match_column`/`match_value`, without touching the rest of the row. **Built.**
-5. **Create Spreadsheet/Tab** — creates a brand-new spreadsheet, optionally with a header row and a target Drive folder. **Built and bare-create confirmed working live**; `template_spreadsheet_id` deliberately raises rather than silently being ignored, and `folder_id`'s Drive move is built but not yet live-tested — see below for why.
+1. **Get Rows / Read Range** — fetches rows keyed by header name, with optional single-column filtering. Built.
+2. **Search Rows** — finds rows by exact column value; returns matches and their real sheet row numbers. Built.
+3. **Append Row** — adds a row via a single JSON object keyed by header name (no dynamic per-column inputs — see below). Built.
+4. **Update Row/Cell** — updates specific cells within one row, targeted by row number or column match, without touching the rest of the row. Built.
+5. **Create Spreadsheet/Tab** — creates a new spreadsheet, optionally with a header row and target Drive folder. Built. `template_spreadsheet_id` is not supported (see below).
 
-Everything else is not yet started.
+No trigger was built — see Known Constraints.
 
 ---
 
@@ -22,51 +22,53 @@ Everything else is not yet started.
 
 ### OAuth 2.0 — business-level
 
-- One business admin connects a single, shared Google account (`auth_level: business` in [kizen.json](kizen.json), service name `shared`) — same pattern as [plugin-google-drive](../plugin-google-drive/kizen.json), not a per-user connection like Calendar/Outlook Calendar.
-- **Why business, not user-level, decided up front rather than discovered the hard way this time:** every action here is planned as a Code Step (Python automation-step). Code Steps execute as a fixed Kizen service account and can never complete an interactive OAuth consent screen — a `user`-level service 503s with `"User must authorize this service"` regardless of how many times a real human re-authorizes. `plugin-google-drive`'s `CLAUDE.md` documents hitting this live and having to migrate from `user` to `business` mid-build. Since every proposed Sheets action (Get Rows, Search Rows, Append Row, Update Row, Create Spreadsheet) is the same Code Step shape, this plugin starts at `business` from the outset.
-- Trade-off, same as Drive: all actions act as one shared identity. Reading/writing a specific spreadsheet only works if that shared identity actually has access to it — there's no "acts as whichever staff member triggered the workflow."
+- A single shared Google account (`auth_level: business`, service `shared` in `kizen.json`) — same pattern as `plugin-google-drive`, not a per-user connection like Calendar.
+- **Why business-level:** every action runs as a Kizen Code Step, which executes as a fixed service account and cannot complete an interactive OAuth consent flow. A `user`-level service returns a 503 (`"User must authorize this service"`) regardless of authorization attempts — documented in `plugin-google-drive`'s CLAUDE.md after being discovered mid-build there. This plugin starts at `business` from the outset.
+- Trade-off: all actions act as one shared identity. Access to a given spreadsheet depends on that shared account having access to it.
 
-**OAuth scopes requested (current):**
+**Scopes:**
 
 | Scope | Classification | Purpose |
 | --- | --- | --- |
-| `spreadsheets` | Sensitive (not Restricted) | Read + write access for Get Rows / Search Rows / Append Row / Update Row / Create Spreadsheet. Upgraded from `spreadsheets.readonly` when Append Row needed write access — see below. |
-| `drive.file` | Non-sensitive (Google's lightest classification — no CASA, minimal verification) | Lets Create Spreadsheet/Tab's `folder_id` move a newly-created spreadsheet out of My Drive's root, via a second OAuth service — see below. |
-| `userinfo.email`, `userinfo.profile` | — | Show "connected as {email}" in the setup assistant. |
+| `spreadsheets` | Sensitive, not Restricted | Read/write for all core actions. Upgraded from `spreadsheets.readonly` when Append Row required write access. |
+| `drive.file` | Non-sensitive | Lets Create Spreadsheet's `folder_id` move a newly created file out of My Drive's root. |
+| `userinfo.email`, `userinfo.profile` | — | "Connected as {email}" in the setup assistant. |
 
-**Scope upgraded for Append Row, `spreadsheets.readonly` → `spreadsheets`, in `kizen.json`.** Per the scope plan below, this was expected — but **every existing OAuth connection must be reconnected** before Append Row (or anything using the new scope) will actually work; an existing token issued under `.readonly` doesn't retroactively gain write access just because `kizen.json` changed. Also needs the new scope added to the GCP OAuth consent screen's own scope list, same as the original setup — declaring it in `kizen.json` alone isn't enough (see `get_rows`'s section below for that lesson the first time around).
+`spreadsheets`/`spreadsheets.readonly` are Sensitive but not Restricted — no annual CASA assessment, unlike Drive's `drive`/`drive.readonly`. Confirmed against [Google's Sheets API scopes docs](https://developers.google.com/workspace/sheets/api/scopes).
 
-**`drive.file` added for Create Spreadsheet/Tab's `folder_id` input, and it's a materially different situation than the template-copy scope question below.** Moving a file into a folder (`files.update` with `addParents`) is a Drive API operation on a file **this app created itself** moments earlier via the Sheets API — the textbook `drive.file` use case (per-file access to files the app created or opened), unlike `template_spreadsheet_id`'s problem of touching a file the app never created. `drive.file` is Google's lightest scope tier: Non-sensitive, no CASA, minimal verification — a real departure from the "Drive API deliberately not enabled" stance in Known Constraints below, but a low-stakes one.
+Any scope change requires reconnecting the OAuth connection — an existing token doesn't retroactively gain a new scope — and adding the scope to the GCP OAuth consent screen's own scope list; declaring it in `kizen.json` alone is not sufficient.
 
-**Real architectural wrinkle this created:** Kizen's proxy resolves the upstream host per `service_name` (fixed to that service's `base_service_url`) — there's no way to call a different host (Drive's `www.googleapis.com`) through the existing `shared` service, which is pinned to `sheets.googleapis.com`. Added a second service, `shared_drive`, to `kizen.json` — identical `auth_credentials` (same `client_id`, same encrypted `client_secret`, same scopes) to `shared`, differing only in `base_service_url`. **Genuinely unverified:** whether Kizen's setup assistant recognizes these as the same underlying connection (one "Connect" step) or requires authorizing twice for what is, from Google's perspective, one OAuth client. Also unverified: whether the *same* encrypted `client_secret` blob (produced by `npx @kizenapps/cli encrypt -a google_sheets ...`) decrypts correctly when referenced from two different `service_name` entries — assumed yes, since the encryption key should be scoped to the plugin's `api_name`, not the specific service, but not confirmed live.
+**`drive.file` and the two-service architecture.** Moving a file into a folder (`files.update` with `addParents`) is a Drive API operation on a file this app just created — the standard `drive.file` use case, unlike `template_spreadsheet_id`'s problem of touching a file the app didn't create (see below).
 
-**Scope plan for later actions** (document before building, since each scope change requires a fresh reconnect — an existing token doesn't retroactively gain a new scope):
+Kizen's proxy resolves the upstream host per `service_name`, fixed to that service's `base_service_url`. The `shared` service is pinned to `sheets.googleapis.com`, so a second service, `shared_drive`, was added with identical `auth_credentials` and `base_service_url: https://www.googleapis.com`.
 
-| Action | Scope needed | Notes |
+This requires two separate OAuth authorization steps in the setup assistant, one per service — confirmed live. Kizen's setup assistant treats `shared` and `shared_drive` as distinct connections despite sharing the same underlying OAuth client. The same encrypted `client_secret` value works correctly when referenced from both service entries.
+
+**Scope plan by action:**
+
+| Action | Scope | Notes |
 | --- | --- | --- |
 | Get Rows, Search Rows, Append Row, Update Row/Cell | `spreadsheets` | Current. |
-| Create Spreadsheet/Tab — bare create + header row | `spreadsheets` | `spreadsheets.create` covers this; no Drive scope needed. |
-| Create Spreadsheet/Tab — `folder_id` | `drive.file` (via the new `shared_drive` service) | Current — see above. |
-| Create Spreadsheet/Tab — **from template** (`template_spreadsheet_id`) | Likely needs a *different, heavier* Drive scope (`files.copy` on a file this app didn't create) | Still not the same situation as `folder_id` above — this is exactly what Drive's `copy_file` hit: `drive.readonly`/`drive.file` were insufficient there, only full `drive` (Restricted, CASA) worked. Confirm with a feasibility test before committing to the template feature — don't assume `drive.file` covers it just because it worked for `folder_id`. |
-| New Row Added trigger | none (no Sheets push-webhook — see Known Constraints) | Cut from v1 unless the polling/App Script bridge approach below pans out. |
+| Create Spreadsheet — bare create | `spreadsheets` | No Drive scope needed. |
+| Create Spreadsheet — `folder_id` | `drive.file` via `shared_drive` | Current. |
+| Create Spreadsheet — `template_spreadsheet_id` | Likely a heavier Drive scope (`files.copy` on a file this app didn't create) | Matches the situation `plugin-google-drive`'s `copy_file` hit: `drive.readonly`/`drive.file` were insufficient there; only full `drive` (Restricted, CASA) worked. Not feasibility-tested for Sheets. Not built. |
+| New Row Added trigger | None — no Sheets push mechanism | Cut from v1; see Known Constraints. |
 
-`spreadsheets`/`spreadsheets.readonly` are both Google **Sensitive** scopes (real app verification required) but **not Restricted** — unlike Drive's `drive`/`drive.readonly`, they don't require the annual CASA security assessment. Confirmed against Google's current [Sheets API scopes docs](https://developers.google.com/workspace/sheets/api/scopes). Meaningfully lighter compliance lift than the Drive plugin faced, as long as this plugin never needs a Drive scope.
-
-**Proxy URL pattern** (same convention as every other plugin in this workspace):
+**Proxy URL pattern:**
 
 ```text
-/external-integrations/proxy/{plugin_api_name}/shared/{sheets_api_path}
+/external-integrations/proxy/{plugin_api_name}/{service_name}/{api_path}
 ```
 
-`{plugin_api_name}` is `google_sheets` only once this plugin is merged and published. While testing an unmerged PR, Kizen deploys it under `{api_name}_preview_{branch_name_slugified}` instead — using the plain name 404s every proxy call. This cost Drive a full debugging session; check the PR's `plugin-wizard` bot comment ("App Preview Deployment Report") for the current preview name before testing.
+`{plugin_api_name}` is `google_sheets` only once merged and published. While a PR is open, Kizen deploys under `{api_name}_preview_{branch_slug}` — check the PR's `plugin-wizard` bot comment for the current name.
 
-The proxy appends the path after `shared` to `base_service_url`. **Unlike Drive (`https://www.googleapis.com` + `drive/v3/...`), Sheets must use `base_service_url: "https://sheets.googleapis.com"` + `v4/spreadsheets/{id}/values/{range}`** — the Sheets API isn't reachable under the generic `www.googleapis.com/sheets/v4/...` path the way Drive's API is under `www.googleapis.com/drive/v3/...`; that combination returns Google's generic branded HTML 404, not a Sheets API error. Confirmed directly with `curl` and by a live failed run — see the `get_rows` section below for the full story.
+The Sheets API requires `base_service_url: https://sheets.googleapis.com`, not the generic `www.googleapis.com/sheets/v4/...` path Drive uses for its own API. That combination returns Google's generic branded 404 page, not a Sheets API error.
 
 ---
 
 ## kizen.api
 
-Same runtime-injected HTTP client used by every other plugin in this workspace:
+Runtime-injected HTTP client, consistent across this workspace:
 
 ```python
 kizen.api.get(url, params=None, headers=None)
@@ -76,170 +78,187 @@ kizen.api.put(url, data=None, json=None, headers=None)
 kizen.api.delete(url, headers=None)
 ```
 
-Inputs/outputs are runtime-injected globals, not imports: read `inputs.<script_alias>`, write `outputs.<script_alias> = ...`. There's no `return`. **Optional inputs must be read with `getattr(inputs, "name", None)`** — an unwired optional input raises `AttributeError` on direct attribute access rather than evaluating to `None` (confirmed live on Drive's `search_files`).
+`inputs`/`outputs` are runtime-injected globals: read `inputs.<script_alias>`, write `outputs.<script_alias> = ...`. Optional inputs must be read with `getattr(inputs, "name", None)` — direct attribute access raises `AttributeError` when the input is unwired.
 
-Kizen's proxy wraps every successful upstream JSON response in an envelope — `{"status_code", "response_headers", "body": <actual upstream response>}` — every script must read through `resp.json()["body"]`, not `resp.json()` directly (Drive lost real debugging time to this).
+Kizen's proxy wraps every upstream response in an envelope: `{"status_code", "response_headers", "body": <upstream response>}`. Scripts must read through `resp.json()["body"]`, not `resp.json()` directly.
 
 ---
 
 ## Agentic Workflow Steps
 
-### `get_rows`
+### get_rows
 
-**File:** [src/automationSteps/get_rows/script.py](src/automationSteps/get_rows/script.py)
+File: `src/automationSteps/get_rows/script.py`
 
 | Input | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `spreadsheet_id` | string | yes | From the sheet's URL. |
-| `sheet_name` | string | yes | The tab name, e.g. `Sheet1`. Quoted in A1 notation unconditionally (handles spaces/special characters without guessing whether quoting is needed). |
-| `header_row` | number | yes | 1-indexed row containing headers. `required: true` with `default: 1` — **not optional**, because this framework's runtime coerces every input to its declared `data_type` unconditionally, even when unset; an optional `number` input left blank arrives as `''` and crashes on `float('')` *before the script ever runs* (confirmed live — see below). `string` inputs don't have this problem (`str('')` is fine), which is why `filter_column`/`filter_value` stay `required: false`. Rows above `header_row` are ignored entirely (not returned as data). |
-| `header_column` | number | yes | 1-indexed column the headers start in. Same `required: true` + `default: 1` shape as `header_row`, for the same reason. Columns to the left are dropped entirely from both headers and every data row — e.g. a leading row-label/index column. |
+| `sheet_name` | string | yes | Tab name. Always quoted in A1 notation. |
+| `header_row` | number | yes | 1-indexed header row, default `1`. `required: true` with a `default` — see Known Constraints for why an optional numeric input doesn't work. |
+| `header_column` | number | yes | 1-indexed header column, default `1`. Columns to the left are dropped from both headers and data. |
 | `filter_column` | string | no | Header name to filter on. |
-| `filter_value` | string | no | Required if `filter_column` is set; exact-match only. |
+| `filter_value` | string | no | Required if `filter_column` is set; exact match only. |
 
 | Output | Type | Notes |
 | --- | --- | --- |
-| `rows` | string | JSON array string of row objects keyed by header name — the "JSON array string" convention used everywhere in this workspace since the framework has no native list/array `data_type` (see Drive's `matching_files`). |
+| `rows` | string | JSON array of row objects keyed by header name (no native array `data_type` in this framework). |
 | `row_count` | number | |
 
-**Resolves by header name, not raw A1 notation**, per the ticket's ask: fetches the whole sheet via `values.get` (no cell range, just the sheet name), treats `header_row`/`header_column` (both default `1`) as the top-left corner of the real table, and zips each row below/right of that corner against the header names found there. A row shorter than the header count (Sheets omits trailing empty cells) gets `""` for the missing trailing columns. Rows above `header_row` and columns left of `header_column` (e.g. a title/banner row, or a row-label column) are dropped entirely, never returned as data. If either is beyond the sheet's actual dimensions, raises a clear error rather than an `IndexError`.
+Fetches the whole sheet via `values.get`, treats `header_row`/`header_column` as the top-left of the real table, and keys each subsequent row against the header names found there. Rows above `header_row` and columns left of `header_column` are dropped, not returned as data. Out-of-range values raise a clear error rather than an `IndexError`.
 
-**Confirmed working end-to-end** against a real staging test sheet (3 rows, `Name`/`Email`/`Status` headers) — correct header-keyed JSON and `row_count`. Two real bugs surfaced getting there, both fixed:
+Verified end-to-end against a live sheet. Two issues surfaced and were fixed:
+1. `base_service_url` must be `https://sheets.googleapis.com`; the generic `www.googleapis.com/sheets/v4/...` path returns a branded HTML 404, not an API error.
+2. Error handling must check the wrapped `status_code` in the response body, not just `resp.ok` — the proxy returns HTTP 200 even when the upstream call failed, so an unhandled non-JSON body previously crashed with an opaque `AttributeError`.
 
-1. **`base_service_url` must be `https://sheets.googleapis.com`, not `https://www.googleapis.com`** — unlike Drive's `drive/v3`, the Sheets API is *not* reachable under the generic `www.googleapis.com/sheets/v4/...` path. Hitting that path/host combo returns Google's generic branded HTML 404 page (`Error 404 (Not Found)!!1`, robot.png), not a Sheets API JSON error — confirmed directly with `curl`. `kizen.json`'s `base_service_url` is now `https://sheets.googleapis.com` and `script.py`'s path drops the `sheets/` prefix (`v4/spreadsheets/{id}/values/{range}`).
-2. **Error detection must check the wrapped upstream `status_code`, not just `resp.ok`.** Kizen's proxy returns its own HTTP 200 even when the upstream call itself failed (e.g. the 404 above) — `resp.ok` only reflects proxy-level success. The original error handling only checked `resp.ok`, so a non-JSON upstream error body (the HTML page above) crashed with an opaque `AttributeError: 'str' object has no attribute 'get'` instead of a clean message. Fixed by also checking `payload.get("status_code")` and guarding with `isinstance(body, dict)` before treating it as JSON.
+Also confirmed: publishing is required before a plugin can be installed for testing, and while a PR is open, the OAuth consent screen needs both the test Google account added under **Test users** and the exact scopes added to its own scope list — declaring them in `kizen.json` is not sufficient.
 
-Also confirmed live: publishing an app is required before it can be installed into a business for testing (`Install Plugin` fails with "App not published" otherwise), and while a PR is open the OAuth consent screen must have both the target Google account added to **Test users** and the exact scopes (`spreadsheets.readonly`, `userinfo.email`, `userinfo.profile`) added to the consent screen's own scope list — declaring them in `kizen.json` alone isn't enough.
+`values.get` without `valueRenderOption` returns `FORMATTED_VALUE` (display strings, e.g. `"11/19/1990"`), not raw values.
 
-**Framework gotcha found while adding `header_row`:** an optional (`required: false`) input of `data_type: "number"` crashes the whole run with `KizenConversionError: Failed to convert value '' to float` *before* `script.py` executes at all, whenever the field is left blank — the runtime's `kznvar_to_pyvar` unconditionally calls `float(v)` on the raw value regardless of whether the input is required. This doesn't affect `string` inputs (`str('')` succeeds). **Tried adding `"default": 1` while keeping `required: false`, hoping the platform would substitute the default for a blank field — same crash, byte-for-byte.** `default` only works as a UI pre-fill tied to `required: true`; it does not make the runtime substitute a value for a truly optional field left blank. The only working fix: make numeric optional-in-spirit inputs `required: true` with a `"default"` value instead (precedent: `plugin-mysql`'s `mysql_read.return_single_value`) — the platform pre-fills the field in the UI so it's never actually sent blank. Any future numeric input on this plugin (e.g. a page-size input) should follow this pattern, not `required: false`.
+**Framework limitation — optional numeric inputs.** An input with `data_type: "number"` and `required: false` crashes the entire run (`KizenConversionError: Failed to convert value '' to float`) before the script executes, whenever the field is left blank — the runtime unconditionally calls `float()` on the raw value regardless of whether the input is required. `string` inputs don't have this problem. Adding a `"default"` while keeping `required: false` does not help — `default` only pre-fills the UI when `required: true`. The only fix: mark the input `required: true` with a `"default"` (precedent: `plugin-mysql`'s `mysql_read.return_single_value`). Any future numeric input on this plugin should follow this pattern.
 
-**Confirmed live:** `values.get` without `valueRenderOption` returns `FORMATTED_VALUE` (what a user sees in the sheet UI), not raw underlying values — a `Birth Date` column came back as `"11/19/1990"` (a display string), not a raw date serial number. Worth keeping in mind before Search Rows/Update Row build on the same default.
+### search_rows
 
-### `search_rows`
+File: `src/automationSteps/search_rows/script.py`
 
-**File:** [src/automationSteps/search_rows/script.py](src/automationSteps/search_rows/script.py)
-
-Same header-resolution mechanics as `get_rows` (whole-sheet fetch, `header_row`/`header_column` locate the real table, same `required: true` + `default: 1` shape and the same reasons — see above), but always filters (per the ticket's `column_name`/`match_value`, both required, exact-match only) and adds `return_all_matches` (boolean, `required: true` with `default: true` — same defaulted-input pattern as a precaution).
-
-**Confirmed working end-to-end** against the same real staging test sheet: searching `column_name="Status"`, `match_value="Active"` correctly returned only the matching row, keyed by header name, with `row_numbers: [2]` (the real sheet row, not an array index).
-
-**Boolean blank-field behavior differs from `number`:** leaving `return_all_matches` blank in the dev toolkit (an empty string, same as the `header_row` crash scenario) did *not* crash — the run succeeded. Unlike `float('')`, whatever the runtime's boolean coercion does with `''` doesn't raise.
-
-**Both branches of `return_all_matches` confirmed live** against a test sheet with a real duplicate value (two `Name="Scott F"` rows, at sheet rows 2 and 5): `return_all_matches: true` correctly returned both (`row_numbers: [2, 5]`); `return_all_matches: false` correctly stopped at the first (`row_numbers: [2]`). Also confirms the runtime coerces the literal string `"false"` to Python `False` rather than naively truthy-casting a non-empty string — worth knowing, since that would have been a silent, hard-to-notice bug if it went the other way.
-
-One test-methodology note for future live-testing in this dev toolkit: setting a React-controlled input's `.value` directly via `element.value = ...` in injected JS does **not** register with the toolkit's form state — the run still submits the old value. Use the browser tool's dedicated form-fill action (or a real click/keystroke) instead of raw DOM `.value` assignment, or a test can silently run against stale input values.
+Same header-resolution mechanics as `get_rows`, but always filters (`column_name`/`match_value`, both required, exact match) and adds `return_all_matches` (boolean, `required: true` with `default: true`, same defaulted-input pattern).
 
 | Input | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | — | Same as `get_rows`. |
-| `column_name` | string | yes | Header name to search — unlike `get_rows`' `filter_column`, this is always required; searching is this action's whole purpose. |
-| `match_value` | string | yes | Exact-match only, same semantics as `get_rows`' `filter_value`. |
+| `column_name` | string | yes | Header name to search — always required, unlike `get_rows`' `filter_column`. |
+| `match_value` | string | yes | Exact match only. |
 | `return_all_matches` | boolean | yes | `true` (default): every matching row. `false`: stops at the first match. |
 
 | Output | Type | Notes |
 | --- | --- | --- |
-| `matching_rows` | string | JSON array string of matching row objects keyed by header name. Named per the ticket's own spec — also sidesteps Drive's `files` → `matching_files` reserved-name lesson by starting specific. |
-| `row_numbers` | string | JSON array string of the matches' **real 1-indexed sheet row numbers** (not array indices) — e.g. `[4, 7]` means sheet rows 4 and 7. The ticket's own spec lists this as `number, is_list`, but per the "no native list/array `data_type`" convention (see `get_rows`' `rows`), it's a JSON-array-encoded string like every other list output in this workspace. Deliberately real sheet row numbers, not 0-indexed offsets into the result — the ticket's proposed **Update Row/Cell** action takes `row_number` "from a prior Search Rows," so this only works as a `get_rows`↔`search_rows`↔`update_row` handoff if it's the actual number you'd type into the sheet. |
+| `matching_rows` | string | JSON array of matching row objects keyed by header name. |
+| `row_numbers` | string | JSON array of the matches' real 1-indexed sheet row numbers, not array indices — e.g. `[4, 7]` means sheet rows 4 and 7. Deliberately real row numbers so the output can feed directly into `update_row`'s `row_number` input. |
 
-### `append_row`
+Verified end-to-end, including both branches of `return_all_matches` against a sheet with a genuine duplicate value: `true` returned both matches, `false` stopped at the first. Also confirms the runtime coerces the literal string `"false"` to Python `False` correctly rather than truthy-casting any non-empty string.
 
-**File:** [src/automationSteps/append_row/script.py](src/automationSteps/append_row/script.py)
+Leaving `return_all_matches` blank does not crash (unlike a blank numeric input) — boolean coercion of `''` doesn't raise, though the resulting behavior should not be relied on; set it explicitly.
 
-**Not a per-mapped-column input shape, despite the ticket's proposal.** The ticket describes Append Row's input as "one input per mapped column," but `config.json` is static and fixed at build time — it has no way to know a given spreadsheet's actual headers in advance, and nothing in this workspace supports dynamically-generated per-column inputs (checked `plugin-mysql`'s `mysql_write` for precedent on the same underlying problem — structured data whose shape isn't known until runtime — and it sidesteps the problem entirely with a raw `query` string, not dynamic fields). Instead, `row_data` is a single JSON object string keyed by header name, extending the same "JSON-encoded string" convention already used for every list output in this workspace to inputs as well.
+**Testing note:** setting a React-controlled input's `.value` directly via injected JS does not register with the dev toolkit's form state — the run submits the stale value. Use a real form-fill action or keystroke, not direct DOM assignment.
 
-Requires the `spreadsheets` write scope — see the Auth Method section above for the scope upgrade and required reconnect.
+### append_row
+
+File: `src/automationSteps/append_row/script.py`
+
+**Not one input per mapped column, despite the ticket's proposal.** `config.json` is static and can't know a spreadsheet's headers in advance, and no plugin in this workspace supports dynamically generated per-column inputs (`plugin-mysql`'s `mysql_write` faces the same underlying problem and uses a raw query string instead). `row_data` is a JSON object string keyed by header name.
+
+Requires the `spreadsheets` write scope (see Auth Method).
 
 | Input | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | — | Same as `get_rows`/`search_rows`. |
-| `row_data` | string | yes | JSON object string keyed by header name, e.g. `{"Name": "Jane"}`. A key that isn't a real header raises a clear error (headers not present in `row_data` default to blank) rather than silently dropping or misplacing data. |
+| `row_data` | string | yes | JSON object keyed by header name, e.g. `{"Name": "Jane"}`. Unknown keys raise an error; missing headers default to blank. |
 
 | Output | Type | Notes |
 | --- | --- | --- |
-| `row_number` | number | The real 1-indexed sheet row the new data landed on — parsed from Google's `updates.updatedRange` response (e.g. `"Sheet1!A4:D4"` → `4`), not assumed from a local row count. Usable directly as `search_rows`' `row_numbers` output would be. |
-| `spreadsheet_id` | string | Echoes the input, per the ticket's own spec — lets a workflow chain off this action's output alone without re-referencing the original input. |
+| `row_number` | number | Parsed from Google's `updates.updatedRange` response (e.g. `"Sheet1!A4:D4"` → `4`), not assumed from a local row count. |
+| `spreadsheet_id` | string | Echoes the input, per the ticket's spec. |
 
-**`row_data` behavior, worth knowing:**
-- Missing headers default to a blank cell, not an error — `row_data.get(header, "")`.
-- A key that isn't a real header raises a clear error rather than silently dropping or misplacing data (see above).
-- Key order in the JSON object doesn't matter — values are always re-ordered to match the sheet's actual header order.
-- Written with `valueInputOption=USER_ENTERED`, so a value like `"3/4/1995"` is interpreted the same way Sheets would interpret it if typed into a cell directly (e.g. becomes a real date), not stored as a literal string.
-- In a real Kizen workflow, `row_data` would typically be built by an upstream step (e.g. a JSON-builder/Format Text action mapping CRM fields into this shape) rather than hand-written — the ticket's original "one input per mapped column" would have been the more natural authoring experience, but this JSON-object shape is the closest equivalent this framework supports.
+`row_data` behavior:
+- Missing headers default to a blank cell.
+- Unknown keys raise a clear error rather than being silently dropped or misplaced.
+- Key order in the JSON object doesn't matter — values are reordered to match the sheet's actual header order.
+- Written with `valueInputOption=USER_ENTERED`, so values are interpreted the same way as typed input (e.g. `"3/4/1995"` becomes a real date).
 
-**Only single-row appends** — `row_data` is one object, not an array of objects; batch-appending N rows means N calls to this action. Not a limitation the ticket asked to solve, just worth being explicit about.
+Single-row only — batch appends require multiple calls.
 
-**Column-letter math is real, not a placeholder:** `header_column` (a number) has to become an actual A1 column letter (`1` → `A`, `27` → `AA`, etc.) to build the append target range correctly when `header_column` isn't `1` — implemented as a small standalone conversion function (`column_number_to_letter`), verified against known values (`26` → `Z`, `52` → `AZ`, `702` → `ZZ`, `703` → `AAA`) before ever hitting the real API.
+Column position (`header_column` + offset) is converted to an A1 column letter via a standalone `column_number_to_letter` helper, verified against known values (`26`→`Z`, `52`→`AZ`, `702`→`ZZ`, `703`→`AAA`).
 
-**Confirmed working** after the OAuth reconnect under the new `spreadsheets` write scope — the header-row-only fetch, the `values:append` call, and the `updatedRange` row-number parsing all held up against the real API.
+Verified end-to-end after the OAuth reconnect for the `spreadsheets` write scope.
 
-### `update_row`
+### update_row
 
-**File:** [src/automationSteps/update_row/script.py](src/automationSteps/update_row/script.py)
+File: `src/automationSteps/update_row/script.py`
 
-**A genuine partial update, not a full-row overwrite.** `row_data` only names the columns to change — every other cell in the row is left untouched. Implemented via `spreadsheets.values:batchUpdate` with one `{range, values}` entry per changed column (each entry addresses a single cell: `header_column`'s offset within `headers`, converted to an A1 column letter via the same `column_number_to_letter` helper as `append_row`, at the resolved `row_number`), rather than fetching the whole row and writing it back — no risk of a stale read clobbering a column this action was never told about.
+**A partial update, not a full-row overwrite.** `row_data` only names the columns to change. Implemented via `spreadsheets.values:batchUpdate` with one `{range, values}` entry per changed column, rather than reading the row and writing it back — avoids a stale read clobbering an untouched column.
 
-**Row targeting is one of two mutually exclusive paths, per the ticket's own "or":**
-- **`row_number`** (typically piped straight from `search_rows`' `row_numbers` output) — direct, no search needed, so only the header row gets fetched (like `append_row`).
-- **`match_column` + `match_value`** — searches the whole sheet like `search_rows` does, but **requires the match to resolve to exactly one row.** Zero matches raises "no row found"; more than one raises an "ambiguous update target" error naming every matching row number and suggesting `row_number` instead. This is a deliberate design choice, not something the ticket specified either way — updating an unknown number of rows from a single fuzzy match felt like the wrong default for a mutation, unlike `search_rows`' `return_all_matches: true` default for a read.
-- Providing both, or neither, raises a clear error before any API call.
+Row targeting is one of two mutually exclusive paths:
+- `row_number` — direct; only the header row is fetched.
+- `match_column` + `match_value` — searches the sheet; requires exactly one match. Zero matches raises "no row found"; multiple matches raise an "ambiguous update target" error listing every matching row and suggesting `row_number` instead. (Deliberate: an unbounded mutation from a fuzzy match carries different risk than `search_rows`' read-only default of returning all matches.)
 
-**`row_number` is a `string` input, not `number` — deliberately, unlike `header_row`/`header_column`.** There's no sensible numeric default for "which row to update" the way `1` is sensible for "which row are the headers on," and this input genuinely needs to be optional (the `match_column`/`match_value` path is the alternative). Making it `required: false` with `data_type: "number"` would hit the exact `float('')`-on-blank crash documented under `get_rows` — so it's `string` instead (parsed with `int()` only when actually present), sidestepping the framework limitation rather than fighting it with a sentinel value like `0` meaning "unset."
+Providing both or neither raises an error before any API call.
+
+`row_number` is a `string` input, not `number`. There's no sensible numeric default for "which row," and it must remain optional (`match_column`/`match_value` is the alternative path) — a `required: false` numeric input would hit the blank-input crash documented under `get_rows`.
 
 | Input | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | — | Same as the other actions. |
-| `row_number` | string | no* | Real 1-indexed sheet row to update. Must be strictly greater than `header_row` — targeting the header row itself (or above) raises an error. *Required together with the other targeting path being absent — see above. |
-| `match_column` | string | no* | Header name to search. *Required together with `match_value`, as an alternative to `row_number`. |
-| `match_value` | string | no* | Exact-match only, same semantics as `search_rows`. |
-| `row_data` | string | yes | JSON object string keyed by header name — only these columns change. Same "worth knowing" behaviors as `append_row`'s `row_data` (missing-key defaults, unknown-key errors, `USER_ENTERED` interpretation) apply here too. |
+| `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | — | Same as other actions. |
+| `row_number` | string | conditionally | Must be strictly greater than `header_row`. Required unless `match_column`/`match_value` are set. |
+| `match_column` | string | conditionally | Required together with `match_value`, as an alternative to `row_number`. |
+| `match_value` | string | conditionally | Exact match only. |
+| `row_data` | string | yes | JSON object keyed by header name — only these columns change. Same behavior as `append_row`'s `row_data`. |
 
 | Output | Type | Notes |
 | --- | --- | --- |
-| `row_number` | number | The real 1-indexed sheet row that was updated — either the input echoed back, or the one resolved via `match_column`/`match_value`. |
-| `success` | boolean | Always `true` when this output is reached — any failure raises an exception instead of returning `success: false`, consistent with every other action in this plugin. Kept because the ticket's own spec asks for it, but it's not a meaningfully independent signal from "the action didn't error." |
+| `row_number` | number | The row that was updated. |
+| `success` | boolean | Always `true` when reached — failures raise exceptions rather than returning `false`. |
 
-**Confirmed working end-to-end**, all three paths against the real staging sheet:
-- **`row_number` direct** — updated row 3's `Status` to `"Reactivated"`; a follow-up `get_rows` confirmed `Name`/`Email`/`Birth Date` were untouched, proving the partial update genuinely only writes the named columns.
-- **`match_column`/`match_value`, unique match** — `Name = "Alex Rivera"` correctly resolved to its real row (`8`) and updated it.
-- **`match_column`/`match_value`, ambiguous match** — `Name = "Success Successorson"` (which existed on 3 rows by then) correctly raised `"3 rows match 'Name' = 'Success Successorson' (rows [3, 6, 7]) — ambiguous update target. Use row_number instead to target one exactly."` rather than guessing or silently updating one arbitrarily.
+Verified end-to-end for all three paths:
+- Direct `row_number`: changed one column; a follow-up `get_rows` confirmed the other columns were untouched.
+- Unique `match_column`/`match_value`: resolved to the correct row.
+- Ambiguous match: correctly rejected, listing the exact conflicting row numbers.
 
-### `create_spreadsheet`
+### create_spreadsheet
 
-**File:** [src/automationSteps/create_spreadsheet/script.py](src/automationSteps/create_spreadsheet/script.py)
+File: `src/automationSteps/create_spreadsheet/script.py`
 
-**`template_spreadsheet_id` deliberately raises rather than being silently ignored or half-implemented.** Copying from a template needs a Drive API call (`files.copy`) on a file this app didn't create itself, which is exactly the situation Drive's own `copy_file` hit — `drive.readonly`/`drive.file` were insufficient there, only full `drive` (Restricted, annual CASA assessment) worked. That assumption has never been feasibility-tested for Sheets specifically. Rather than guess at a Drive scope, silently ignore the input, or half-build something untested, providing `template_spreadsheet_id` raises a clear error explaining exactly why and pointing back to the Auth Method section — a real scope/compliance decision for a human to make, not something to commit to silently. This is a different (and likely heavier) scope question than `folder_id`'s, below.
+**`template_spreadsheet_id` is not supported.** Copying from a template requires `files.copy` on a file this app didn't create — the same situation `plugin-google-drive`'s `copy_file` hit, where `drive.readonly`/`drive.file` were insufficient and only full `drive` (Restricted, CASA) worked. Not feasibility-tested for Sheets. Providing a value raises a clear error rather than guessing at scope or half-implementing it.
 
-**`folder_id` moves the new spreadsheet out of My Drive's root** — the Sheets API's `create` call has no concept of a parent folder at all; that's exclusively a Drive API operation (`files.update` with `addParents`/`removeParents`). Uses the new `shared_drive` service (see Auth Method section for the two-services architecture this required, and what's still unverified about it).
+**`folder_id` moves the new spreadsheet out of My Drive's root.** The Sheets `create` call has no folder concept; this is a Drive API operation via the `shared_drive` service (see Auth Method).
 
-Given there's no existing sheet structure to resolve against — the whole point is creating a brand-new, empty sheet — there's no `header_row`/`header_column` input here the way every other action has; headers always land at `A1` in the fresh sheet.
+No `header_row`/`header_column` inputs — there's no existing structure to resolve against; headers always land at A1.
 
 | Input | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `spreadsheet_name` | string | yes | Title for the new spreadsheet. Named `spreadsheet_name`, not `name` — `name` is a reserved API name (see Known Constraints). |
-| `template_spreadsheet_id` | string | no | **Not yet supported** — see above. Providing any value raises. |
-| `header_row_values` | string | no | JSON array string of header names, e.g. `["Name", "Email"]`, written into row 1. Leave blank for an empty sheet. Written with `valueInputOption=RAW`, deliberately unlike `append_row`/`update_row`'s `USER_ENTERED` — headers should stay exactly as typed, never auto-formatted into a date/number by Sheets' own interpretation. |
-| `folder_id` | string | no | Drive folder ID (from the folder's URL) to move the new spreadsheet into. Leave blank to leave it in My Drive's root — the Sheets API's own default. Requires `drive.file` (see above). |
+| `template_spreadsheet_id` | string | no | Not supported — see above. Any value raises. |
+| `header_row_values` | string | no | JSON array of header names, written into row 1. Uses `valueInputOption=RAW`, unlike `append_row`/`update_row`'s `USER_ENTERED` — headers should never be auto-formatted. |
+| `folder_id` | string | no | Drive folder ID to move the new spreadsheet into. Requires `drive.file`. |
 
 | Output | Type | Notes |
 | --- | --- | --- |
-| `spreadsheet_id` | string | The new spreadsheet's ID, parsed from the create response's `spreadsheetId`. |
-| `sheet_name` | string | The new sheet's first tab name — **Google's own default (`Sheet1`)**, not something this action sets, since no input lets the caller choose it and the ticket didn't ask for one. Parsed from the create response's `sheets[0].properties.title` rather than assumed, in case that default ever changes. |
+| `spreadsheet_id` | string | Parsed from the create response's `spreadsheetId`. |
+| `sheet_name` | string | The default tab name (`Sheet1`), parsed from the response rather than assumed. |
 
-**Bare create confirmed working live**: created a real spreadsheet (`name="Test_Sheet_Hello_World_1"`), returned a real `spreadsheet_id` and `sheet_name: "Sheet1"`, verified by opening it directly in Google Sheets. Surfaced a real gap in the process, not a bug: with no `folder_id`, it landed in My Drive's root with no way to place it anywhere else — which is exactly why `folder_id` was added.
-
-**`folder_id`'s Drive move is not yet tested against the real API** — it's new code on a new (second) service that itself has an unverified setup-assistant/connection-sharing question (see Auth Method section). Needs a live run once the `drive.file` scope is added to the OAuth consent screen and reconnected.
+Verified end-to-end, including `folder_id`, once the Drive API was enabled on the GCP project and both OAuth services were connected.
 
 ---
 
-## Known Constraints / Open Questions From the Spike
+## Known Constraints / Open Questions
 
-- **No Sheets push-notification webhook, unlike Drive's `files.watch`/Changes API.** The Sheets API has no equivalent subscribe-to-changes mechanism. Options to investigate for the "New Row Added" trigger, in rough order of how much custom infrastructure they need:
-  - **Polling**: a Scheduled trigger (native Kizen Agentic Workflow trigger, no custom plugin capability needed — same primitive Drive's `watch_drive_changes` design leans on) calls Get Rows/Search Rows on a cadence and diffs against the last-seen row count/row IDs. Simplest, but cadence is a real trade-off (latency vs. quota/cost) and there's no server-side "what changed" signal — the plugin has to compute the diff itself, probably by persisting last-seen row count somewhere.
-  - **Apps Script bridge**: an Apps Script bound to the target sheet, using an `onChange`/`onEdit` installable trigger, that calls out to a Kizen webhook URL on new rows. Real push-like latency, but requires the user to install a script *inside every sheet* they want watched — a much heavier setup burden than Drive's plugin-side-only `watch_drive_changes`, and it's Apps Script (JavaScript in the user's Google account), not something this plugin's Python Code Steps can deploy on the user's behalf. Would need its own feasibility spike.
-  - Recommendation for v1: cut the trigger entirely (per the ticket's own suggested fallback) and revisit with a dedicated feasibility pass once the five core actions are built and there's a concrete workflow that needs it.
-- **`developer_business_id.staging` copied from `plugin-google-drive`'s `kizen.json`** (same value) — assumed to be the shared staging test business used across these plugin spikes. Confirm this is actually correct for this repo before testing against staging.
-- **Reserved names apply to inputs too, not just outputs.** Drive's `search_files` had to rename its `files` output to `matching_files` after a deploy-time `400 API Name is reserved`. `create_spreadsheet`'s `name` **input** hit the exact same error on publish — confirmed `name` specifically is reserved, renamed to `spreadsheet_name`. Every other input/output name across all five actions in this plugin passed the same publish validation cleanly (the error response is a full parallel array across every action's every input, and only this one entry was populated), so `name` is a real, specific hit, not a sign that the whole naming scheme is suspect. Still no advance list of reserved names to check against — if a future name 400s, suspect the shortest/most generic word first (`name`, `id`, `type`, `status` are exactly the kind of names worth avoiding) and rename.
-- **OAuth Client ID / GCP project**: a new, dedicated GCP project was created for this plugin (not shared with Drive/Calendar's projects) — mirrors the fact that Drive and Calendar already use distinct `client_id`s. Sheets API is the only API enabled on it for now; the Drive API is deliberately not enabled, to avoid any Restricted-scope exposure until/unless the "Create Spreadsheet from template" action actually needs it.
+**New Row Added trigger — investigated, cut from v1.**
+- The Sheets API has no watch/push mechanism (Drive has a dedicated [push notifications guide](https://developers.google.com/workspace/drive/api/guides/push); the equivalent Sheets URL 404s).
+- Drive's `files.watch` can technically target a spreadsheet's file ID, but delivers little over polling: notifications are throttled to ~3 minutes minimum, carry no row/cell detail, and `drive.file` wouldn't cover a pre-existing sheet the app didn't create.
+- No plugin in this workspace defines a trigger — Scheduled and Webhook triggers are native Kizen primitives. Drive's `watch_drive_changes` action registers Kizen's own Webhook trigger URL with Google; it isn't a trigger itself.
+- Practical implication: polling requires no new plugin code. A native Scheduled trigger paired with `get_rows`/`search_rows` already supports "check periodically" — the remaining piece (diffing against last-seen state) belongs in the workflow.
+- An Apps Script bridge is technically feasible (the [Apps Script API](https://developers.google.com/apps-script/api/how-tos/manage-projects) can create and deploy a script bound to a sheet) but requires a third Google API, a new OAuth scope (classification unconfirmed), a different runtime, and installable triggers that typically must be registered from within Apps Script itself. Large enough to warrant its own spike.
+
+**`developer_business_id.staging`** was copied from `plugin-google-drive`'s `kizen.json`, assumed to be the shared staging test business. Confirmed correct for this repo.
+
+**Reserved names apply to inputs, not just outputs.** `plugin-google-drive` hit this on an output (`files` → `matching_files`); this plugin hit it on an input (`name` → `spreadsheet_name`). No published list of reserved names exists — the shortest, most generic word is the first suspect.
+
+**GCP project** is dedicated to this plugin, not shared with Drive/Calendar. The Drive API is enabled (for `drive.file`); the Apps Script API and full `drive` scope are not, and stay off until a concrete need arises.
+
+---
+
+## SmartConnector CSV/XLSX Automatic Pull — Investigated, Not Built
+
+Ticket question: *"Smartconnectors already support csv/xlsx manual input. Explore pulling from a connected Google Sheet automatically."*
+
+SmartConnector is a core Kizen platform object (`/api/smart-connectors/{api_name}`), not part of the plugin SDK — confirmed by searching every plugin repo in this workspace. Its mechanics exist today only in Kizen's Workato and Zapier integrations:
+
+1. `connector_type: spreadsheet` — a file is uploaded via a presigned-S3 flow (`GET /s3/presigned-post` → S3 → `POST /s3/success`, tagged `kind: "smart_connector_import"`) to obtain a Kizen file ID, which is then POSTed to `/api/smart-connectors/{api_name}/start-connector-flow` along with optional `sql_parameters`, `is_dry_run`, and `disable_diff_check`.
+2. `connector_type: webhook` — skips the file; `POST /api/smart-connectors/{api_name}/webhook` with a JSON payload directly.
+
+The missing piece — a generic "upload bytes, obtain a file ID, start a connector flow" bridge — is not Google-Sheets-specific, and no plugin implements it; Workato and Zapier each built it independently. Building it inside this plugin would be a third independent implementation of logic that likely belongs once, centrally, either as a Kizen-native step or a shared plugin capability. Documented rather than built, pending that decision.
+
+`plugin-google-drive`'s `export_file` action can already export a Google Sheet to CSV (a Sheet is a Drive file), via `files.export` with `target_mime_type: "text/csv"` — so "get this sheet as CSV" already exists elsewhere. Note: Google's `files.export` has historically exported only the first tab of a spreadsheet, not all sheets — unconfirmed whether that still holds.
+
+If built later, the shape would likely be: read the target sheet, upload the resulting bytes through Kizen's file-upload flow, then call `start-connector-flow` on the target SmartConnector's `api_name`.
 
 ---
 
