@@ -1,28 +1,15 @@
 import json
 from urllib.parse import quote
 
-# While this PR is unmerged, Kizen deploys under the preview-qualified api_name below,
-# not the plain "google_sheets" — confirmed via this PR's plugin-wizard bot comment.
-# MUST be reverted to "/external-integrations/proxy/google_sheets/shared" before merging to main.
+# Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
 BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_explore_feasibility_of_google_sheets_integration/shared"
 
-# Kizen's proxy resolves the upstream host per service_name (fixed to that service's
-# base_service_url) — there's no way to hit a different host through the "shared" service,
-# which is pinned to sheets.googleapis.com. Moving a file into a folder is a Drive API call
-# (www.googleapis.com), so it goes through a second service, "shared_drive", added specifically
-# for this. Untested whether Kizen's setup assistant treats this as a second "Connect" step even
-# though it shares the exact same OAuth client/credentials as "shared" — same MUST-revert caveat
-# as BASE_URL above applies to this one too.
+# Drive API call (www.googleapis.com), so it needs its own service — "shared" is pinned to sheets.googleapis.com; same MUST-revert caveat as BASE_URL applies here too.
 DRIVE_BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_explore_feasibility_of_google_sheets_integration/shared_drive"
 
 
 def raise_sheets_error(payload, context, fallback_status):
-    # Kizen's proxy wraps a successful upstream call as {"status_code", "response_headers",
-    # "body": <upstream response>} — a relayed Google error lives at payload["body"]["error"].
-    # A proxy-level error (routing/auth/content-type) is Kizen's own flat, unwrapped shape.
-    # The upstream body isn't always JSON either (e.g. a wrong host/path returns Google's
-    # generic HTML 404 page) — body.get(...) below would itself crash with an unhelpful
-    # AttributeError if not guarded by isinstance.
+    # Proxy wraps upstream calls as {status_code, body}; a Google error lives at body["error"], a proxy error is flat, and body may not be a dict at all (e.g. HTML on a wrong host) — hence the isinstance guard.
     body = payload.get("body")
     google_error = body.get("error") if isinstance(body, dict) else None
     if isinstance(google_error, dict):
@@ -40,8 +27,7 @@ def raise_sheets_error(payload, context, fallback_status):
 
 
 def a1_quote_sheet_name(sheet_name):
-    # A1 notation always accepts a quoted sheet name, spaces or not, so quote
-    # unconditionally rather than guessing when it's required.
+    # Quote unconditionally — always valid in A1 notation, so no need to guess when it's required.
     return "'" + sheet_name.replace("'", "''") + "'"
 
 
@@ -107,9 +93,7 @@ if header_row_values:
     )
 
 if folder_id:
-    # The Sheets API's create call always lands the file in My Drive's root — moving it into a
-    # folder means removing "root" as a parent and adding folder_id, via the Drive API (a
-    # different service/host — see DRIVE_BASE_URL above).
+    # The create call always lands the file in My Drive's root — remove "root" as a parent and add folder_id via the Drive API.
     move_url = (
         f"{DRIVE_BASE_URL}/drive/v3/files/{new_spreadsheet_id}"
         f"?addParents={quote(folder_id, safe='')}&removeParents=root&fields=id,parents"

@@ -2,19 +2,12 @@ import json
 import re
 from urllib.parse import quote
 
-# While this PR is unmerged, Kizen deploys under the preview-qualified api_name below,
-# not the plain "google_sheets" — confirmed via this PR's plugin-wizard bot comment.
-# MUST be reverted to "/external-integrations/proxy/google_sheets/shared" before merging to main.
+# Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
 BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_explore_feasibility_of_google_sheets_integration/shared"
 
 
 def raise_sheets_error(payload, context, fallback_status):
-    # Kizen's proxy wraps a successful upstream call as {"status_code", "response_headers",
-    # "body": <upstream response>} — a relayed Google error lives at payload["body"]["error"].
-    # A proxy-level error (routing/auth/content-type) is Kizen's own flat, unwrapped shape.
-    # The upstream body isn't always JSON either (e.g. a wrong host/path returns Google's
-    # generic HTML 404 page) — body.get(...) below would itself crash with an unhelpful
-    # AttributeError if not guarded by isinstance.
+    # Proxy wraps upstream calls as {status_code, body}; a Google error lives at body["error"], a proxy error is flat, and body may not be a dict at all (e.g. HTML on a wrong host) — hence the isinstance guard.
     body = payload.get("body")
     google_error = body.get("error") if isinstance(body, dict) else None
     if isinstance(google_error, dict):
@@ -32,8 +25,7 @@ def raise_sheets_error(payload, context, fallback_status):
 
 
 def a1_quote_sheet_name(name):
-    # A1 notation always accepts a quoted sheet name, spaces or not, so quote
-    # unconditionally rather than guessing when it's required.
+    # Quote unconditionally — always valid in A1 notation, so no need to guess when it's required.
     return "'" + name.replace("'", "''") + "'"
 
 
