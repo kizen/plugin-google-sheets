@@ -10,6 +10,7 @@ Per the spike ticket, the full v1 surface is: Get Rows / Read Range, Search Rows
 
 1. **Get Rows / Read Range** — fetches rows from a sheet, keyed by header name, with optional single-column filtering. **Built.**
 2. **Search Rows** — finds row(s) by exact column value, returning both the matching rows and their real sheet row numbers (for a subsequent Update Row). **Built.**
+3. **Append Row** — adds a new row to the end of a sheet, keyed by header name via a single JSON-object input (no dynamic per-column inputs — see below). **Built, not yet live-tested** (needs the OAuth reconnect for the new write scope first).
 
 Everything else is not yet started.
 
@@ -27,15 +28,17 @@ Everything else is not yet started.
 
 | Scope | Classification | Purpose |
 | --- | --- | --- |
-| `spreadsheets.readonly` | Sensitive (not Restricted) | Read access for Get Rows / Search Rows. |
+| `spreadsheets` | Sensitive (not Restricted) | Read + write access for Get Rows / Search Rows / Append Row. Upgraded from `spreadsheets.readonly` when Append Row needed write access — see below. |
 | `userinfo.email`, `userinfo.profile` | — | Show "connected as {email}" in the setup assistant. |
+
+**Scope upgraded for Append Row, `spreadsheets.readonly` → `spreadsheets`, in `kizen.json`.** Per the scope plan below, this was expected — but **every existing OAuth connection must be reconnected** before Append Row (or anything using the new scope) will actually work; an existing token issued under `.readonly` doesn't retroactively gain write access just because `kizen.json` changed. Also needs the new scope added to the GCP OAuth consent screen's own scope list, same as the original setup — declaring it in `kizen.json` alone isn't enough (see `get_rows`'s section below for that lesson the first time around).
 
 **Scope plan for later actions** (document before building, since each scope change requires a fresh reconnect — an existing token doesn't retroactively gain a new scope):
 
 | Action | Scope needed | Notes |
 | --- | --- | --- |
-| Get Rows, Search Rows | `spreadsheets.readonly` | Current. |
-| Append Row, Update Row/Cell | `spreadsheets` (drop `.readonly`) | `spreadsheets` is Sensitive, same tier as `.readonly` — no extra CASA cost to upgrade, unlike Drive's `drive.readonly` → `drive` jump (both Restricted). |
+| Get Rows, Search Rows, Append Row | `spreadsheets` | Current. |
+| Update Row/Cell | `spreadsheets` | Already covered by the Append Row upgrade — no further scope change needed. |
 | Create Spreadsheet/Tab — bare create + header row | `spreadsheets` | `spreadsheets.create` covers this; no Drive scope needed. |
 | Create Spreadsheet/Tab — **from template** (`template_spreadsheet_id`) | Likely needs a Drive scope (`files.copy` on a file this app didn't create) | This is exactly the situation Drive's `copy_file` hit: `drive.readonly`/`drive.file` were insufficient, only full `drive` (Restricted, CASA) worked. Confirm this assumption with a feasibility test before committing to the template feature — don't assume `drive.file` is enough just because it's the "recommended" scope in Google's docs. |
 | New Row Added trigger | none (no Sheets push-webhook — see Known Constraints) | Cut from v1 unless the polling/App Script bridge approach below pans out. |
@@ -131,7 +134,29 @@ One test-methodology note for future live-testing in this dev toolkit: setting a
 | `matching_rows` | string | JSON array string of matching row objects keyed by header name. Named per the ticket's own spec — also sidesteps Drive's `files` → `matching_files` reserved-name lesson by starting specific. |
 | `row_numbers` | string | JSON array string of the matches' **real 1-indexed sheet row numbers** (not array indices) — e.g. `[4, 7]` means sheet rows 4 and 7. The ticket's own spec lists this as `number, is_list`, but per the "no native list/array `data_type`" convention (see `get_rows`' `rows`), it's a JSON-array-encoded string like every other list output in this workspace. Deliberately real sheet row numbers, not 0-indexed offsets into the result — the ticket's proposed **Update Row/Cell** action takes `row_number` "from a prior Search Rows," so this only works as a `get_rows`↔`search_rows`↔`update_row` handoff if it's the actual number you'd type into the sheet. |
 
-**Not yet tested against a real staging sheet** — built following `get_rows`' now-proven patterns (envelope unwrapping, `header_row`/`header_column` resolution, defaulted-input shape), but no live run yet.
+### `append_row`
+
+**File:** [src/automationSteps/append_row/script.py](src/automationSteps/append_row/script.py)
+
+**Not a per-mapped-column input shape, despite the ticket's proposal.** The ticket describes Append Row's input as "one input per mapped column," but `config.json` is static and fixed at build time — it has no way to know a given spreadsheet's actual headers in advance, and nothing in this workspace supports dynamically-generated per-column inputs (checked `plugin-mysql`'s `mysql_write` for precedent on the same underlying problem — structured data whose shape isn't known until runtime — and it sidesteps the problem entirely with a raw `query` string, not dynamic fields). Instead, `row_data` is a single JSON object string keyed by header name, extending the same "JSON-encoded string" convention already used for every list output in this workspace to inputs as well.
+
+Requires the `spreadsheets` write scope — see the Auth Method section above for the scope upgrade and required reconnect.
+
+| Input | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | — | Same as `get_rows`/`search_rows`. |
+| `row_data` | string | yes | JSON object string keyed by header name, e.g. `{"Name": "Jane"}`. A key that isn't a real header raises a clear error (headers not present in `row_data` default to blank) rather than silently dropping or misplacing data. |
+
+| Output | Type | Notes |
+| --- | --- | --- |
+| `row_number` | number | The real 1-indexed sheet row the new data landed on — parsed from Google's `updates.updatedRange` response (e.g. `"Sheet1!A4:D4"` → `4`), not assumed from a local row count. Usable directly as `search_rows`' `row_numbers` output would be. |
+| `spreadsheet_id` | string | Echoes the input, per the ticket's own spec — lets a workflow chain off this action's output alone without re-referencing the original input. |
+
+**Only single-row appends** — `row_data` is one object, not an array of objects; batch-appending N rows means N calls to this action. Not a limitation the ticket asked to solve, just worth being explicit about.
+
+**Column-letter math is real, not a placeholder:** `header_column` (a number) has to become an actual A1 column letter (`1` → `A`, `27` → `AA`, etc.) to build the append target range correctly when `header_column` isn't `1` — implemented as a small standalone conversion function (`column_number_to_letter`), verified against known values (`26` → `Z`, `52` → `AZ`, `702` → `ZZ`, `703` → `AAA`) before ever hitting the real API.
+
+**Not yet tested against a real staging sheet** — the OAuth reconnect for the new `spreadsheets` write scope has to happen first (see Auth Method section). Built following `get_rows`/`search_rows`'s now-proven patterns (envelope unwrapping, header resolution, defaulted-input shape), but every code path here — the header-row-only fetch, the `values:append` call, the `updatedRange` row-number parsing — is genuinely new and unverified against the real API.
 
 ---
 
@@ -160,7 +185,10 @@ plugin-google-sheets/
         ├── get_rows/
         │   ├── config.json
         │   └── script.py
-        └── search_rows/
+        ├── search_rows/
+        │   ├── config.json
+        │   └── script.py
+        └── append_row/
             ├── config.json
             └── script.py
 ```
