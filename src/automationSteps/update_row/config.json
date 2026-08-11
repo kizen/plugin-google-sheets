@@ -1,0 +1,103 @@
+{
+  "name": "Update Row/Cell",
+  "plugin_description": "Integrates with Google Sheets to read, search, and write rows from Kizen agentic workflows.",
+  "action_description": "Updates specific cells within one row, keyed by header name. Targets the row either by row_number (e.g. from a prior Search Rows) or by match_column/match_value. Only the columns present in row_data are changed — everything else in the row is left untouched.",
+  "runtime": "python-3-13",
+  "action_type": "google_sheets_update_row",
+  "script": "script.py",
+  "inputs": [
+    {
+      "name": "spreadsheet_id",
+      "label": "Spreadsheet ID",
+      "hint": "The ID from the sheet's URL: .../spreadsheets/d/{spreadsheet_id}/edit",
+      "data_type": "string",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "spreadsheet_id"
+    },
+    {
+      "name": "sheet_name",
+      "label": "Sheet Name",
+      "hint": "The tab name at the bottom of the spreadsheet, e.g. Sheet1.",
+      "data_type": "string",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "sheet_name"
+    },
+    {
+      "name": "header_row",
+      "label": "Header Row",
+      "hint": "Which row contains the column headers (1-indexed).",
+      "data_type": "number",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "header_row",
+      "default": 1
+    },
+    {
+      "name": "header_column",
+      "label": "Header Column",
+      "hint": "Which column the headers start in (1-indexed). Columns to the left are ignored.",
+      "data_type": "number",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "header_column",
+      "default": 1
+    },
+    {
+      "name": "row_number",
+      "label": "Row Number",
+      "hint": "Real 1-indexed sheet row to update, typically from a prior Search Rows. Provide this OR match_column + match_value, not both. A string here (not number) deliberately — see CLAUDE.md's optional-number-input gotcha.",
+      "data_type": "string",
+      "required": false,
+      "input_source": "variable",
+      "script_alias": "row_number"
+    },
+    {
+      "name": "match_column",
+      "label": "Match Column",
+      "hint": "Header name to search for the row to update. Provide this (with match_value) OR row_number, not both.",
+      "data_type": "string",
+      "required": false,
+      "input_source": "variable",
+      "script_alias": "match_column"
+    },
+    {
+      "name": "match_value",
+      "label": "Match Value",
+      "hint": "Required if match_column is set. If more than one row matches exactly, this action raises an error rather than guessing which one to update.",
+      "data_type": "string",
+      "required": false,
+      "input_source": "variable",
+      "script_alias": "match_value"
+    },
+    {
+      "name": "row_data",
+      "label": "Row Data",
+      "hint": "JSON object string keyed by header name, e.g. {\"Status\": \"Inactive\"}. Only these columns are updated; everything else in the row is left as-is. A key that isn't a real header raises an error.",
+      "data_type": "string",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "row_data"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "row_number",
+      "label": "Row Number",
+      "hint": "The real 1-indexed sheet row that was updated.",
+      "data_type": "number",
+      "script_alias": "row_number",
+      "conflict_resolution": "overwrite",
+      "create_field_options": false
+    },
+    {
+      "name": "success",
+      "label": "Success",
+      "data_type": "boolean",
+      "script_alias": "success",
+      "conflict_resolution": "overwrite",
+      "create_field_options": false
+    }
+  ]
+}

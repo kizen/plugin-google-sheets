@@ -11,6 +11,7 @@ Per the spike ticket, the full v1 surface is: Get Rows / Read Range, Search Rows
 1. **Get Rows / Read Range** — fetches rows from a sheet, keyed by header name, with optional single-column filtering. **Built.**
 2. **Search Rows** — finds row(s) by exact column value, returning both the matching rows and their real sheet row numbers (for a subsequent Update Row). **Built.**
 3. **Append Row** — adds a new row to the end of a sheet, keyed by header name via a single JSON-object input (no dynamic per-column inputs — see below). **Built.**
+4. **Update Row/Cell** — updates specific cells within one row, targeted by `row_number` or by `match_column`/`match_value`, without touching the rest of the row. **Built.**
 
 Everything else is not yet started.
 
@@ -165,6 +166,37 @@ Requires the `spreadsheets` write scope — see the Auth Method section above fo
 
 **Confirmed working** after the OAuth reconnect under the new `spreadsheets` write scope — the header-row-only fetch, the `values:append` call, and the `updatedRange` row-number parsing all held up against the real API.
 
+### `update_row`
+
+**File:** [src/automationSteps/update_row/script.py](src/automationSteps/update_row/script.py)
+
+**A genuine partial update, not a full-row overwrite.** `row_data` only names the columns to change — every other cell in the row is left untouched. Implemented via `spreadsheets.values:batchUpdate` with one `{range, values}` entry per changed column (each entry addresses a single cell: `header_column`'s offset within `headers`, converted to an A1 column letter via the same `column_number_to_letter` helper as `append_row`, at the resolved `row_number`), rather than fetching the whole row and writing it back — no risk of a stale read clobbering a column this action was never told about.
+
+**Row targeting is one of two mutually exclusive paths, per the ticket's own "or":**
+- **`row_number`** (typically piped straight from `search_rows`' `row_numbers` output) — direct, no search needed, so only the header row gets fetched (like `append_row`).
+- **`match_column` + `match_value`** — searches the whole sheet like `search_rows` does, but **requires the match to resolve to exactly one row.** Zero matches raises "no row found"; more than one raises an "ambiguous update target" error naming every matching row number and suggesting `row_number` instead. This is a deliberate design choice, not something the ticket specified either way — updating an unknown number of rows from a single fuzzy match felt like the wrong default for a mutation, unlike `search_rows`' `return_all_matches: true` default for a read.
+- Providing both, or neither, raises a clear error before any API call.
+
+**`row_number` is a `string` input, not `number` — deliberately, unlike `header_row`/`header_column`.** There's no sensible numeric default for "which row to update" the way `1` is sensible for "which row are the headers on," and this input genuinely needs to be optional (the `match_column`/`match_value` path is the alternative). Making it `required: false` with `data_type: "number"` would hit the exact `float('')`-on-blank crash documented under `get_rows` — so it's `string` instead (parsed with `int()` only when actually present), sidestepping the framework limitation rather than fighting it with a sentinel value like `0` meaning "unset."
+
+| Input | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | — | Same as the other actions. |
+| `row_number` | string | no* | Real 1-indexed sheet row to update. Must be strictly greater than `header_row` — targeting the header row itself (or above) raises an error. *Required together with the other targeting path being absent — see above. |
+| `match_column` | string | no* | Header name to search. *Required together with `match_value`, as an alternative to `row_number`. |
+| `match_value` | string | no* | Exact-match only, same semantics as `search_rows`. |
+| `row_data` | string | yes | JSON object string keyed by header name — only these columns change. Same "worth knowing" behaviors as `append_row`'s `row_data` (missing-key defaults, unknown-key errors, `USER_ENTERED` interpretation) apply here too. |
+
+| Output | Type | Notes |
+| --- | --- | --- |
+| `row_number` | number | The real 1-indexed sheet row that was updated — either the input echoed back, or the one resolved via `match_column`/`match_value`. |
+| `success` | boolean | Always `true` when this output is reached — any failure raises an exception instead of returning `success: false`, consistent with every other action in this plugin. Kept because the ticket's own spec asks for it, but it's not a meaningfully independent signal from "the action didn't error." |
+
+**Confirmed working end-to-end**, all three paths against the real staging sheet:
+- **`row_number` direct** — updated row 3's `Status` to `"Reactivated"`; a follow-up `get_rows` confirmed `Name`/`Email`/`Birth Date` were untouched, proving the partial update genuinely only writes the named columns.
+- **`match_column`/`match_value`, unique match** — `Name = "Alex Rivera"` correctly resolved to its real row (`8`) and updated it.
+- **`match_column`/`match_value`, ambiguous match** — `Name = "Success Successorson"` (which existed on 3 rows by then) correctly raised `"3 rows match 'Name' = 'Success Successorson' (rows [3, 6, 7]) — ambiguous update target. Use row_number instead to target one exactly."` rather than guessing or silently updating one arbitrarily.
+
 ---
 
 ## Known Constraints / Open Questions From the Spike
@@ -195,7 +227,10 @@ plugin-google-sheets/
         ├── search_rows/
         │   ├── config.json
         │   └── script.py
-        └── append_row/
+        ├── append_row/
+        │   ├── config.json
+        │   └── script.py
+        └── update_row/
             ├── config.json
             └── script.py
 ```
