@@ -21,7 +21,7 @@
       "auth_type": "oauth",
       "auth_level": "business",
       "required_entitlement": null,
-      "base_service_url": "https://www.googleapis.com",
+      "base_service_url": "https://sheets.googleapis.com",
       "auth_credentials": {
         "client_id": "787848408231-a2skd46hkpvmojrqrarmbcqp3uku5iat.apps.googleusercontent.com",
         "client_secret": {

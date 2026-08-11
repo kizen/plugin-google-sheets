@@ -1,26 +1,23 @@
 import json
 from urllib.parse import quote
 
-# NOTE: while testing an unmerged PR, Kizen deploys under
-# "{api_name}_preview_{branch_name_slugified}" instead of the plain api_name
-# (learned the hard way on plugin-google-drive — every proxy call 404s otherwise).
-# Check the PR's plugin-wizard bot comment for the current preview name.
-BASE_URL = "/external-integrations/proxy/google_sheets/shared"
+# While this PR is unmerged, Kizen deploys under the preview-qualified api_name below,
+# not the plain "google_sheets" — confirmed via this PR's plugin-wizard bot comment.
+# MUST be reverted to "/external-integrations/proxy/google_sheets/shared" before merging to main.
+BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_explore_feasibility_of_google_sheets_integration/shared"
 
 
-def raise_sheets_error(resp, context):
+def raise_sheets_error(payload, context, fallback_status):
     # Kizen's proxy wraps a successful upstream call as {"status_code", "response_headers",
     # "body": <upstream response>} — a relayed Google error lives at payload["body"]["error"].
     # A proxy-level error (routing/auth/content-type) is Kizen's own flat, unwrapped shape.
-    try:
-        payload = resp.json()
-    except Exception:
-        raise Exception(f"Google Sheets error {context}: unknown_error — HTTP {resp.status_code}")
-
+    # The upstream body isn't always JSON either (e.g. a wrong host/path returns Google's
+    # generic HTML 404 page) — body.get(...) below would itself crash with an unhelpful
+    # AttributeError if not guarded by isinstance.
     body = payload.get("body")
     google_error = body.get("error") if isinstance(body, dict) else None
     if isinstance(google_error, dict):
-        message = google_error.get("message", f"HTTP {resp.status_code}")
+        message = google_error.get("message", "unknown_error")
         status = google_error.get("status", "unknown_error")
         raise Exception(f"Google Sheets error {context}: {status} — {message}")
 
@@ -28,7 +25,9 @@ def raise_sheets_error(resp, context):
     if kizen_error:
         raise Exception(f"Google Sheets error {context}: proxy_error — {kizen_error}")
 
-    raise Exception(f"Google Sheets error {context}: unknown_error — HTTP {resp.status_code}")
+    upstream_status = payload.get("status_code", fallback_status)
+    snippet = str(body)[:200] if body is not None else "no body"
+    raise Exception(f"Google Sheets error {context}: unknown_error — upstream HTTP {upstream_status}, body: {snippet}")
 
 
 def a1_quote_sheet_name(name):
@@ -47,11 +46,18 @@ if filter_column and not filter_value:
 
 range_param = quote(a1_quote_sheet_name(sheet_name), safe="")
 
-resp = kizen.api.get(f"{BASE_URL}/sheets/v4/spreadsheets/{spreadsheet_id}/values/{range_param}")
-if not resp.ok:
-    raise_sheets_error(resp, "reading rows")
+resp = kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{range_param}")
 
-values = resp.json().get("body", {}).get("values", [])
+try:
+    payload = resp.json()
+except Exception:
+    raise Exception(f"Google Sheets error reading rows: unknown_error — HTTP {resp.status_code}")
+
+body = payload.get("body")
+if not resp.ok or payload.get("status_code", 200) >= 400 or not isinstance(body, dict):
+    raise_sheets_error(payload, "reading rows", resp.status_code)
+
+values = body.get("values", [])
 
 if not values:
     outputs.rows = json.dumps([])
