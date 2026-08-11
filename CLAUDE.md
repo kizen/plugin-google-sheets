@@ -9,6 +9,7 @@ Reads, searches, and writes rows in Google Sheets from Kizen agentic workflows, 
 Per the spike ticket, the full v1 surface is: Get Rows / Read Range, Search Rows, Append Row, Update Row/Cell, Create Spreadsheet/Tab, and (if feasible) a New Row Added trigger. Built incrementally, one action at a time.
 
 1. **Get Rows / Read Range** — fetches rows from a sheet, keyed by header name, with optional single-column filtering. **Built.**
+2. **Search Rows** — finds row(s) by exact column value, returning both the matching rows and their real sheet row numbers (for a subsequent Update Row). **Built.**
 
 Everything else is not yet started.
 
@@ -104,6 +105,34 @@ Also confirmed live: publishing an app is required before it can be installed in
 
 **Confirmed live:** `values.get` without `valueRenderOption` returns `FORMATTED_VALUE` (what a user sees in the sheet UI), not raw underlying values — a `Birth Date` column came back as `"11/19/1990"` (a display string), not a raw date serial number. Worth keeping in mind before Search Rows/Update Row build on the same default.
 
+### `search_rows`
+
+**File:** [src/automationSteps/search_rows/script.py](src/automationSteps/search_rows/script.py)
+
+Same header-resolution mechanics as `get_rows` (whole-sheet fetch, `header_row`/`header_column` locate the real table, same `required: true` + `default: 1` shape and the same reasons — see above), but always filters (per the ticket's `column_name`/`match_value`, both required, exact-match only) and adds `return_all_matches` (boolean, `required: true` with `default: true` — same defaulted-input pattern as a precaution).
+
+**Confirmed working end-to-end** against the same real staging test sheet: searching `column_name="Status"`, `match_value="Active"` correctly returned only the matching row, keyed by header name, with `row_numbers: [2]` (the real sheet row, not an array index).
+
+**Boolean blank-field behavior differs from `number`:** leaving `return_all_matches` blank in the dev toolkit (an empty string, same as the `header_row` crash scenario) did *not* crash — the run succeeded. Unlike `float('')`, whatever the runtime's boolean coercion does with `''` doesn't raise.
+
+**Both branches of `return_all_matches` confirmed live** against a test sheet with a real duplicate value (two `Name="Scott F"` rows, at sheet rows 2 and 5): `return_all_matches: true` correctly returned both (`row_numbers: [2, 5]`); `return_all_matches: false` correctly stopped at the first (`row_numbers: [2]`). Also confirms the runtime coerces the literal string `"false"` to Python `False` rather than naively truthy-casting a non-empty string — worth knowing, since that would have been a silent, hard-to-notice bug if it went the other way.
+
+One test-methodology note for future live-testing in this dev toolkit: setting a React-controlled input's `.value` directly via `element.value = ...` in injected JS does **not** register with the toolkit's form state — the run still submits the old value. Use the browser tool's dedicated form-fill action (or a real click/keystroke) instead of raw DOM `.value` assignment, or a test can silently run against stale input values.
+
+| Input | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | — | Same as `get_rows`. |
+| `column_name` | string | yes | Header name to search — unlike `get_rows`' `filter_column`, this is always required; searching is this action's whole purpose. |
+| `match_value` | string | yes | Exact-match only, same semantics as `get_rows`' `filter_value`. |
+| `return_all_matches` | boolean | yes | `true` (default): every matching row. `false`: stops at the first match. |
+
+| Output | Type | Notes |
+| --- | --- | --- |
+| `matching_rows` | string | JSON array string of matching row objects keyed by header name. Named per the ticket's own spec — also sidesteps Drive's `files` → `matching_files` reserved-name lesson by starting specific. |
+| `row_numbers` | string | JSON array string of the matches' **real 1-indexed sheet row numbers** (not array indices) — e.g. `[4, 7]` means sheet rows 4 and 7. The ticket's own spec lists this as `number, is_list`, but per the "no native list/array `data_type`" convention (see `get_rows`' `rows`), it's a JSON-array-encoded string like every other list output in this workspace. Deliberately real sheet row numbers, not 0-indexed offsets into the result — the ticket's proposed **Update Row/Cell** action takes `row_number` "from a prior Search Rows," so this only works as a `get_rows`↔`search_rows`↔`update_row` handoff if it's the actual number you'd type into the sheet. |
+
+**Not yet tested against a real staging sheet** — built following `get_rows`' now-proven patterns (envelope unwrapping, `header_row`/`header_column` resolution, defaulted-input shape), but no live run yet.
+
 ---
 
 ## Known Constraints / Open Questions From the Spike
@@ -113,7 +142,7 @@ Also confirmed live: publishing an app is required before it can be installed in
   - **Apps Script bridge**: an Apps Script bound to the target sheet, using an `onChange`/`onEdit` installable trigger, that calls out to a Kizen webhook URL on new rows. Real push-like latency, but requires the user to install a script *inside every sheet* they want watched — a much heavier setup burden than Drive's plugin-side-only `watch_drive_changes`, and it's Apps Script (JavaScript in the user's Google account), not something this plugin's Python Code Steps can deploy on the user's behalf. Would need its own feasibility spike.
   - Recommendation for v1: cut the trigger entirely (per the ticket's own suggested fallback) and revisit with a dedicated feasibility pass once the five core actions are built and there's a concrete workflow that needs it.
 - **`developer_business_id.staging` copied from `plugin-google-drive`'s `kizen.json`** (same value) — assumed to be the shared staging test business used across these plugin spikes. Confirm this is actually correct for this repo before testing against staging.
-- **Reserved output names**: Drive's `search_files` had to rename its `files` output to `matching_files` after a deploy-time `400 API Name is reserved` with no advance list of reserved names to check against. `rows`/`row_count` haven't been deploy-tested yet — if either fails the same way, suspect the shortest/most generic name first (per Drive's note) and rename.
+- **Reserved output names**: Drive's `search_files` had to rename its `files` output to `matching_files` after a deploy-time `400 API Name is reserved` with no advance list of reserved names to check against. `get_rows`' `rows`/`row_count` ran successfully against real staging without hitting this, so it's evidently not universally reserved — but there's still no advance list, so if a future output name 400s, suspect the shortest/most generic name first (per Drive's note) and rename.
 - **OAuth Client ID / GCP project**: a new, dedicated GCP project was created for this plugin (not shared with Drive/Calendar's projects) — mirrors the fact that Drive and Calendar already use distinct `client_id`s. Sheets API is the only API enabled on it for now; the Drive API is deliberately not enabled, to avoid any Restricted-scope exposure until/unless the "Create Spreadsheet from template" action actually needs it.
 
 ---
@@ -128,7 +157,10 @@ plugin-google-sheets/
 │   └── 1.0.0.md
 └── src/
     └── automationSteps/
-        └── get_rows/
+        ├── get_rows/
+        │   ├── config.json
+        │   └── script.py
+        └── search_rows/
             ├── config.json
             └── script.py
 ```
