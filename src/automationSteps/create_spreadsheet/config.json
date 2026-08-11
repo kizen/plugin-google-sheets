@@ -1,0 +1,65 @@
+{
+  "name": "Create Spreadsheet/Tab",
+  "plugin_description": "Integrates with Google Sheets to read, search, and write rows from Kizen agentic workflows.",
+  "action_description": "Creates a brand-new spreadsheet, optionally with a header row. Creating from a template is not yet supported — see hint.",
+  "runtime": "python-3-13",
+  "action_type": "google_sheets_create_spreadsheet",
+  "script": "script.py",
+  "inputs": [
+    {
+      "name": "name",
+      "label": "Name",
+      "hint": "Title for the new spreadsheet.",
+      "data_type": "string",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "name"
+    },
+    {
+      "name": "template_spreadsheet_id",
+      "label": "Template Spreadsheet ID",
+      "hint": "NOT YET SUPPORTED. Copying from a template needs a Google Drive API scope this plugin doesn't have, and whether drive.file is even sufficient hasn't been confirmed (see CLAUDE.md). Leave blank; providing a value raises a clear error instead of silently being ignored.",
+      "data_type": "string",
+      "required": false,
+      "input_source": "variable",
+      "script_alias": "template_spreadsheet_id"
+    },
+    {
+      "name": "header_row_values",
+      "label": "Header Row Values",
+      "hint": "JSON array string of header names to write into row 1 of the new sheet, e.g. [\"Name\", \"Email\"]. Leave blank to create an empty sheet.",
+      "data_type": "string",
+      "required": false,
+      "input_source": "variable",
+      "script_alias": "header_row_values"
+    },
+    {
+      "name": "folder_id",
+      "label": "Folder ID",
+      "hint": "Google Drive folder ID to place the new spreadsheet in (from the folder's URL: .../folders/{folder_id}). Leave blank to create it in My Drive's root, same as the Sheets API's own default. Requires the drive.file scope.",
+      "data_type": "string",
+      "required": false,
+      "input_source": "variable",
+      "script_alias": "folder_id"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "spreadsheet_id",
+      "label": "Spreadsheet ID",
+      "data_type": "string",
+      "script_alias": "spreadsheet_id",
+      "conflict_resolution": "overwrite",
+      "create_field_options": false
+    },
+    {
+      "name": "sheet_name",
+      "label": "Sheet Name",
+      "hint": "The new sheet's first tab name (Google's own default, e.g. Sheet1, since no input lets you choose it).",
+      "data_type": "string",
+      "script_alias": "sheet_name",
+      "conflict_resolution": "overwrite",
+      "create_field_options": false
+    }
+  ]
+}
