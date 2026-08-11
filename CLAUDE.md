@@ -10,7 +10,7 @@ Per the spike ticket, the full v1 surface is: Get Rows / Read Range, Search Rows
 
 1. **Get Rows / Read Range** — fetches rows from a sheet, keyed by header name, with optional single-column filtering. **Built.**
 2. **Search Rows** — finds row(s) by exact column value, returning both the matching rows and their real sheet row numbers (for a subsequent Update Row). **Built.**
-3. **Append Row** — adds a new row to the end of a sheet, keyed by header name via a single JSON-object input (no dynamic per-column inputs — see below). **Built, not yet live-tested** (needs the OAuth reconnect for the new write scope first).
+3. **Append Row** — adds a new row to the end of a sheet, keyed by header name via a single JSON-object input (no dynamic per-column inputs — see below). **Built.**
 
 Everything else is not yet started.
 
@@ -152,11 +152,18 @@ Requires the `spreadsheets` write scope — see the Auth Method section above fo
 | `row_number` | number | The real 1-indexed sheet row the new data landed on — parsed from Google's `updates.updatedRange` response (e.g. `"Sheet1!A4:D4"` → `4`), not assumed from a local row count. Usable directly as `search_rows`' `row_numbers` output would be. |
 | `spreadsheet_id` | string | Echoes the input, per the ticket's own spec — lets a workflow chain off this action's output alone without re-referencing the original input. |
 
+**`row_data` behavior, worth knowing:**
+- Missing headers default to a blank cell, not an error — `row_data.get(header, "")`.
+- A key that isn't a real header raises a clear error rather than silently dropping or misplacing data (see above).
+- Key order in the JSON object doesn't matter — values are always re-ordered to match the sheet's actual header order.
+- Written with `valueInputOption=USER_ENTERED`, so a value like `"3/4/1995"` is interpreted the same way Sheets would interpret it if typed into a cell directly (e.g. becomes a real date), not stored as a literal string.
+- In a real Kizen workflow, `row_data` would typically be built by an upstream step (e.g. a JSON-builder/Format Text action mapping CRM fields into this shape) rather than hand-written — the ticket's original "one input per mapped column" would have been the more natural authoring experience, but this JSON-object shape is the closest equivalent this framework supports.
+
 **Only single-row appends** — `row_data` is one object, not an array of objects; batch-appending N rows means N calls to this action. Not a limitation the ticket asked to solve, just worth being explicit about.
 
 **Column-letter math is real, not a placeholder:** `header_column` (a number) has to become an actual A1 column letter (`1` → `A`, `27` → `AA`, etc.) to build the append target range correctly when `header_column` isn't `1` — implemented as a small standalone conversion function (`column_number_to_letter`), verified against known values (`26` → `Z`, `52` → `AZ`, `702` → `ZZ`, `703` → `AAA`) before ever hitting the real API.
 
-**Not yet tested against a real staging sheet** — the OAuth reconnect for the new `spreadsheets` write scope has to happen first (see Auth Method section). Built following `get_rows`/`search_rows`'s now-proven patterns (envelope unwrapping, header resolution, defaulted-input shape), but every code path here — the header-row-only fetch, the `values:append` call, the `updatedRange` row-number parsing — is genuinely new and unverified against the real API.
+**Confirmed working** after the OAuth reconnect under the new `spreadsheets` write scope — the header-row-only fetch, the `values:append` call, and the `updatedRange` row-number parsing all held up against the real API.
 
 ---
 
