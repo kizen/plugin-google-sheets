@@ -28,34 +28,41 @@ def a1_quote_sheet_name(name):
     return "'" + name.replace("'", "''") + "'"
 
 
+def resolve_positive_int(raw, name):
+    # Shared by header_row/header_column — both default to 1 and must be at least 1.
+    value = int(raw) if raw is not None else 1
+    if value < 1:
+        raise Exception(f"{name} must be 1 or greater, got {value}.")
+    return value
+
+
+def check_sheets_response(resp, context):
+    # Handles both proxy-level failures (resp.ok False) and upstream failures wrapped inside a 200 envelope.
+    try:
+        payload = resp.json()
+    except Exception:
+        raise Exception(f"Google Sheets error {context}: unknown_error — HTTP {resp.status_code}")
+
+    body = payload.get("body")
+    if not resp.ok or payload.get("status_code", 200) >= 400 or not isinstance(body, dict):
+        raise_sheets_error(payload, context, resp.status_code)
+
+    return body
+
+
 spreadsheet_id = inputs.spreadsheet_id
 sheet_name = inputs.sheet_name
 column_name = inputs.column_name
 match_value = inputs.match_value
 return_all_matches = inputs.return_all_matches
 
-header_row_input = getattr(inputs, "header_row", None)
-header_row = int(header_row_input) if header_row_input is not None else 1
-if header_row < 1:
-    raise Exception(f"header_row must be 1 or greater, got {header_row}.")
-
-header_column_input = getattr(inputs, "header_column", None)
-header_column = int(header_column_input) if header_column_input is not None else 1
-if header_column < 1:
-    raise Exception(f"header_column must be 1 or greater, got {header_column}.")
+header_row = resolve_positive_int(getattr(inputs, "header_row", None), "header_row")
+header_column = resolve_positive_int(getattr(inputs, "header_column", None), "header_column")
 
 range_param = quote(a1_quote_sheet_name(sheet_name), safe="")
 
 resp = kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{range_param}")
-
-try:
-    payload = resp.json()
-except Exception:
-    raise Exception(f"Google Sheets error searching rows: unknown_error — HTTP {resp.status_code}")
-
-body = payload.get("body")
-if not resp.ok or payload.get("status_code", 200) >= 400 or not isinstance(body, dict):
-    raise_sheets_error(payload, "searching rows", resp.status_code)
+body = check_sheets_response(resp, "searching rows")
 
 values = body.get("values", [])
 
