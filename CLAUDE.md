@@ -12,7 +12,7 @@ Per the spike ticket: Get Rows / Read Range, Search Rows, Append Row, Update Row
 2. **Search Rows** — finds rows by exact column value; returns matches and their real sheet row numbers. Built.
 3. **Append Row** — adds a row via a single JSON object keyed by header name (no dynamic per-column inputs — see below). Built.
 4. **Update Row/Cell** — updates specific cells within one row, targeted by row number or column match, without touching the rest of the row. Built.
-5. **Create Spreadsheet/Tab** — creates a new spreadsheet, optionally with a header row and target Drive folder. Built. `template_spreadsheet_id` is not supported (see below).
+5. **Create Spreadsheet/Tab** — creates a new spreadsheet (blank or copied from an existing spreadsheet as a template), optionally with a header row and target Drive folder. Built.
 
 No trigger was built — see Known Constraints.
 
@@ -31,14 +31,14 @@ No trigger was built — see Known Constraints.
 | Scope | Classification | Purpose |
 | --- | --- | --- |
 | `spreadsheets` | Sensitive, not Restricted | Read/write for all core actions. Upgraded from `spreadsheets.readonly` when Append Row required write access. |
-| `drive.file` | Non-sensitive | Lets Create Spreadsheet's `folder_id` move a newly created file out of My Drive's root. |
+| `drive` | **Restricted** | Lets Create Spreadsheet's `folder_id` move a newly created file, and `template_spreadsheet_id` copy an existing file this app didn't create. See below for why `drive.file` isn't sufficient. |
 | `userinfo.email`, `userinfo.profile` | — | "Connected as {email}" in the setup assistant. |
 
 `spreadsheets`/`spreadsheets.readonly` are Sensitive but not Restricted — no annual CASA assessment, unlike Drive's `drive`/`drive.readonly`. Confirmed against [Google's Sheets API scopes docs](https://developers.google.com/workspace/sheets/api/scopes).
 
 Any scope change requires reconnecting the OAuth connection — an existing token doesn't retroactively gain a new scope — and adding the scope to the GCP OAuth consent screen's own scope list; declaring it in `kizen.json` alone is not sufficient.
 
-**`drive.file` and the two-service architecture.** Moving a file into a folder (`files.update` with `addParents`) is a Drive API operation on a file this app just created — the standard `drive.file` use case, unlike `template_spreadsheet_id`'s problem of touching a file the app didn't create (see below).
+**Why full `drive`, not `drive.file`.** `drive.file` only grants per-file access to files this app itself created or opened — fine for moving a spreadsheet the app just created via `folder_id`, but not for `template_spreadsheet_id`, which points at an arbitrary pre-existing spreadsheet the app has never touched. This is the exact situation `plugin-google-drive`'s `copy_file` action hit: `drive.readonly`/`drive.file` were insufficient there, only full `drive` worked. `drive` is Google-**Restricted**, which requires a CASA security assessment before production/general-availability use — not before testing with an explicit test-user allowlist, which is how this was built and verified. Moving this plugin to production requires that assessment; that's a deliberate, separate decision, not something resolved by this spike.
 
 Kizen's proxy resolves the upstream host per `service_name`, fixed to that service's `base_service_url`. The `shared` service is pinned to `sheets.googleapis.com`, so a second service, `shared_drive`, was added with identical `auth_credentials` and `base_service_url: https://www.googleapis.com`.
 
@@ -50,8 +50,8 @@ This requires two separate OAuth authorization steps in the setup assistant, one
 | --- | --- | --- |
 | Get Rows, Search Rows, Append Row, Update Row/Cell | `spreadsheets` | Current. |
 | Create Spreadsheet — bare create | `spreadsheets` | No Drive scope needed. |
-| Create Spreadsheet — `folder_id` | `drive.file` via `shared_drive` | Current. |
-| Create Spreadsheet — `template_spreadsheet_id` | Likely a heavier Drive scope (`files.copy` on a file this app didn't create) | Matches the situation `plugin-google-drive`'s `copy_file` hit: `drive.readonly`/`drive.file` were insufficient there; only full `drive` (Restricted, CASA) worked. Not feasibility-tested for Sheets. Not built. |
+| Create Spreadsheet — `folder_id` | `drive` via `shared_drive` | Current. (`drive.file` would have been sufficient for this alone, but `template_spreadsheet_id` on the same action needs full `drive` anyway — see above.) |
+| Create Spreadsheet — `template_spreadsheet_id` | `drive` via `shared_drive` | Current. Restricted scope — see above for the production/CASA implication. |
 | New Row Added trigger | None — no Sheets push mechanism | Cut from v1; see Known Constraints. |
 
 **Proxy URL pattern:**
@@ -206,25 +206,29 @@ Verified end-to-end for all three paths:
 
 File: `src/automationSteps/create_spreadsheet/script.py`
 
-**`template_spreadsheet_id` is not supported.** Copying from a template requires `files.copy` on a file this app didn't create — the same situation `plugin-google-drive`'s `copy_file` hit, where `drive.readonly`/`drive.file` were insufficient and only full `drive` (Restricted, CASA) worked. Not feasibility-tested for Sheets. Providing a value raises a clear error rather than guessing at scope or half-implementing it.
+**Two mutually exclusive creation paths, branching on `template_spreadsheet_id`:**
+- **Bare create** (no `template_spreadsheet_id`): `spreadsheets.create` via the `shared` service. `folder_id`, if set, needs a separate follow-up `files.update` (`addParents`/`removeParents=root`) via `shared_drive`, since the Sheets create call has no folder concept at all.
+- **Template copy** (`template_spreadsheet_id` set): `files.copy` on the template, via `shared_drive`, requiring full `drive` scope (Restricted) — see Auth Method for why `drive.file` isn't enough. `folder_id`, if set, is passed as `parents` directly in the same copy call, so no separate move step is needed on this path. Drive's file resource doesn't expose a spreadsheet's internal sheet list, so a second call — a Sheets API metadata fetch (`fields=sheets.properties.title`) via `shared` — is needed afterward to resolve the copied file's first tab name for the `sheet_name` output.
 
-**`folder_id` moves the new spreadsheet out of My Drive's root.** The Sheets `create` call has no folder concept; this is a Drive API operation via the `shared_drive` service (see Auth Method).
+Either way, `header_row_values` (if set) is written the same way afterward, regardless of which path produced the spreadsheet.
 
-No `header_row`/`header_column` inputs — there's no existing structure to resolve against; headers always land at A1.
+No `header_row`/`header_column` inputs — there's no existing structure to resolve against for a bare create; headers always land at A1. (A template copy *does* inherit whatever structure the template already had — `header_row_values`, if set, still only touches row 1.)
 
 | Input | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `spreadsheet_name` | string | yes | Title for the new spreadsheet. Named `spreadsheet_name`, not `name` — `name` is a reserved API name (see Known Constraints). |
-| `template_spreadsheet_id` | string | no | Not supported — see above. Any value raises. |
-| `header_row_values` | string | no | JSON array of header names, written into row 1. Uses `valueInputOption=RAW`, unlike `append_row`/`update_row`'s `USER_ENTERED` — headers should never be auto-formatted. |
-| `folder_id` | string | no | Drive folder ID to move the new spreadsheet into. Requires `drive.file`. |
+| `template_spreadsheet_id` | string | no | Spreadsheet ID to copy as a template. Requires `drive` (Restricted) — see Auth Method. |
+| `header_row_values` | string | no | JSON array of header names, written into row 1. Uses `valueInputOption=RAW`, unlike `append_row`/`update_row`'s `USER_ENTERED` — headers should never be auto-formatted. On a template copy, this overwrites row 1 of whatever the template already had there. |
+| `folder_id` | string | no | Drive folder ID to place the new spreadsheet into. |
 
 | Output | Type | Notes |
 | --- | --- | --- |
-| `spreadsheet_id` | string | Parsed from the create response's `spreadsheetId`. |
-| `sheet_name` | string | The default tab name (`Sheet1`), parsed from the response rather than assumed. |
+| `spreadsheet_id` | string | The new (or copied) spreadsheet's ID. |
+| `sheet_name` | string | The first tab's name. For a bare create this is Google's own default (`Sheet1`); for a template copy, it's whatever the template's first tab was actually called — either way, parsed from the real response rather than assumed. |
 
-Verified end-to-end, including `folder_id`, once the Drive API was enabled on the GCP project and both OAuth services were connected.
+**Bare-create path verified end-to-end**, all inputs: bare create; `folder_id` (visually confirmed placement in the target folder); `header_row_values` (confirmed via a raw read that the exact header values were written — a sheet with only a header row and no data rows correctly reports `row_count: 0` from `get_rows`, which isn't a bug, just headers never counting as a data row).
+
+**Template-copy path (`files.copy`, the `drive` scope, and the metadata-lookup call) is newly implemented and not yet live-tested** — needs the `drive` scope reconnected on both OAuth services before it can run at all.
 
 ---
 
@@ -232,7 +236,7 @@ Verified end-to-end, including `folder_id`, once the Drive API was enabled on th
 
 **New Row Added trigger — investigated, cut from v1.**
 - The Sheets API has no watch/push mechanism (Drive has a dedicated [push notifications guide](https://developers.google.com/workspace/drive/api/guides/push); the equivalent Sheets URL 404s).
-- Drive's `files.watch` can technically target a spreadsheet's file ID, but delivers little over polling: notifications are throttled to ~3 minutes minimum, carry no row/cell detail, and `drive.file` wouldn't cover a pre-existing sheet the app didn't create.
+- Drive's `files.watch` can technically target a spreadsheet's file ID (now feasible scope-wise, with `drive` in hand), but delivers little over polling: notifications are throttled to ~3 minutes minimum and carry no row/cell detail — still need a `get_rows`/`search_rows` follow-up and your own diff logic either way.
 - No plugin in this workspace defines a trigger — Scheduled and Webhook triggers are native Kizen primitives. Drive's `watch_drive_changes` action registers Kizen's own Webhook trigger URL with Google; it isn't a trigger itself.
 - Practical implication: polling requires no new plugin code. A native Scheduled trigger paired with `get_rows`/`search_rows` already supports "check periodically" — the remaining piece (diffing against last-seen state) belongs in the workflow.
 - An Apps Script bridge is technically feasible (the [Apps Script API](https://developers.google.com/apps-script/api/how-tos/manage-projects) can create and deploy a script bound to a sheet) but requires a third Google API, a new OAuth scope (classification unconfirmed), a different runtime, and installable triggers that typically must be registered from within Apps Script itself. Large enough to warrant its own spike.
@@ -241,7 +245,7 @@ Verified end-to-end, including `folder_id`, once the Drive API was enabled on th
 
 **Reserved names apply to inputs, not just outputs.** `plugin-google-drive` hit this on an output (`files` → `matching_files`); this plugin hit it on an input (`name` → `spreadsheet_name`). No published list of reserved names exists — the shortest, most generic word is the first suspect.
 
-**GCP project** is dedicated to this plugin, not shared with Drive/Calendar. The Drive API is enabled (for `drive.file`); the Apps Script API and full `drive` scope are not, and stay off until a concrete need arises.
+**GCP project** is dedicated to this plugin, not shared with Drive/Calendar. The Drive API is enabled, and the `drive` scope (Restricted) is requested for `folder_id`/`template_spreadsheet_id`. The Apps Script API is not enabled, and stays off until a concrete need arises. Moving to production requires the CASA assessment that `drive` triggers — not done, and a deliberate separate decision (see Auth Method).
 
 ---
 

@@ -49,14 +49,6 @@ template_spreadsheet_id = getattr(inputs, "template_spreadsheet_id", None)
 header_row_values_raw = getattr(inputs, "header_row_values", None)
 folder_id = getattr(inputs, "folder_id", None)
 
-if template_spreadsheet_id:
-    raise Exception(
-        "template_spreadsheet_id is not yet supported: copying from a template needs a Google Drive "
-        "API scope this plugin doesn't have, and it's unconfirmed whether drive.file would even be "
-        "sufficient (see CLAUDE.md's scope plan). Leave template_spreadsheet_id blank to create a bare "
-        "spreadsheet instead."
-    )
-
 header_row_values = None
 if header_row_values_raw:
     try:
@@ -67,19 +59,61 @@ if header_row_values_raw:
     if not isinstance(header_row_values, list):
         raise Exception(f"header_row_values must be a JSON array (e.g. [\"Name\", \"Email\"]), got: {header_row_values_raw}")
 
-body = check_sheets_response(
-    kizen.api.post(f"{BASE_URL}/v4/spreadsheets", json={"properties": {"title": spreadsheet_name}}),
-    "creating spreadsheet",
-)
+if template_spreadsheet_id:
+    # files.copy on a file this app didn't create requires full "drive" scope (Restricted) — drive.file
+    # only covers files the app itself created/opened. Setting parents here does the folder placement
+    # in the same call, so no separate move step is needed on this path (unlike the bare-create path).
+    copy_body = {"name": spreadsheet_name}
+    if folder_id:
+        copy_body["parents"] = [folder_id]
 
-new_spreadsheet_id = body.get("spreadsheetId")
-sheets = body.get("sheets", [])
-if not new_spreadsheet_id or not sheets:
-    raise Exception(f"Google API error creating spreadsheet: response missing spreadsheetId/sheets: {body}")
+    copy_response = check_sheets_response(
+        kizen.api.post(
+            f"{DRIVE_BASE_URL}/drive/v3/files/{template_spreadsheet_id}/copy?supportsAllDrives=true&fields=id",
+            json=copy_body,
+        ),
+        "copying template spreadsheet",
+    )
 
-sheet_name = sheets[0].get("properties", {}).get("title")
-if not sheet_name:
-    raise Exception(f"Google API error creating spreadsheet: response missing the new sheet's title: {body}")
+    new_spreadsheet_id = copy_response.get("id")
+    if not new_spreadsheet_id:
+        raise Exception(f"Google API error copying template spreadsheet: response missing id: {copy_response}")
+
+    # Drive's file resource doesn't expose the spreadsheet's internal sheets — a separate
+    # Sheets API metadata call is needed to find the first tab's name.
+    metadata = check_sheets_response(
+        kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{new_spreadsheet_id}?fields=sheets.properties.title"),
+        "reading copied spreadsheet's sheet names",
+    )
+    sheets = metadata.get("sheets", [])
+    if not sheets:
+        raise Exception(f"Google API error copying template spreadsheet: response missing sheets: {metadata}")
+
+    sheet_name = sheets[0].get("properties", {}).get("title")
+    if not sheet_name:
+        raise Exception(f"Google API error copying template spreadsheet: response missing the first sheet's title: {metadata}")
+else:
+    body = check_sheets_response(
+        kizen.api.post(f"{BASE_URL}/v4/spreadsheets", json={"properties": {"title": spreadsheet_name}}),
+        "creating spreadsheet",
+    )
+
+    new_spreadsheet_id = body.get("spreadsheetId")
+    sheets = body.get("sheets", [])
+    if not new_spreadsheet_id or not sheets:
+        raise Exception(f"Google API error creating spreadsheet: response missing spreadsheetId/sheets: {body}")
+
+    sheet_name = sheets[0].get("properties", {}).get("title")
+    if not sheet_name:
+        raise Exception(f"Google API error creating spreadsheet: response missing the new sheet's title: {body}")
+
+    if folder_id:
+        # The create call always lands the file in My Drive's root — remove "root" as a parent and add folder_id via the Drive API.
+        move_url = (
+            f"{DRIVE_BASE_URL}/drive/v3/files/{new_spreadsheet_id}"
+            f"?addParents={quote(folder_id, safe='')}&removeParents=root&fields=id,parents"
+        )
+        check_sheets_response(kizen.api.patch(move_url, json={}), "moving spreadsheet into folder_id")
 
 if header_row_values:
     quoted_sheet_name = a1_quote_sheet_name(sheet_name)
@@ -91,14 +125,6 @@ if header_row_values:
         ),
         "writing header row",
     )
-
-if folder_id:
-    # The create call always lands the file in My Drive's root — remove "root" as a parent and add folder_id via the Drive API.
-    move_url = (
-        f"{DRIVE_BASE_URL}/drive/v3/files/{new_spreadsheet_id}"
-        f"?addParents={quote(folder_id, safe='')}&removeParents=root&fields=id,parents"
-    )
-    check_sheets_response(kizen.api.patch(move_url, json={}), "moving spreadsheet into folder_id")
 
 outputs.spreadsheet_id = new_spreadsheet_id
 outputs.sheet_name = sheet_name

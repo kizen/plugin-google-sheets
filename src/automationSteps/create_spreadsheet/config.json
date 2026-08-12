@@ -1,7 +1,7 @@
 {
   "name": "Create Spreadsheet/Tab",
   "plugin_description": "Integrates with Google Sheets to read, search, and write rows from Kizen agentic workflows.",
-  "action_description": "Creates a brand-new spreadsheet, optionally with a header row. Creating from a template is not yet supported — see hint.",
+  "action_description": "Creates a new spreadsheet, either blank or copied from an existing spreadsheet as a template, optionally with a header row and target Drive folder.",
   "runtime": "python-3-13",
   "action_type": "google_sheets_create_spreadsheet",
   "script": "script.py",
@@ -18,7 +18,7 @@
     {
       "name": "template_spreadsheet_id",
       "label": "Template Spreadsheet ID",
-      "hint": "NOT YET SUPPORTED. Copying from a template needs a Google Drive API scope this plugin doesn't have, and whether drive.file is even sufficient hasn't been confirmed (see CLAUDE.md). Leave blank; providing a value raises a clear error instead of silently being ignored.",
+      "hint": "Spreadsheet ID to copy as a template. Requires the full drive scope (Restricted) — drive.file isn't sufficient for a file this app didn't create. Leave blank to create a blank spreadsheet instead.",
       "data_type": "string",
       "required": false,
       "input_source": "variable",
@@ -36,7 +36,7 @@
     {
       "name": "folder_id",
       "label": "Folder ID",
-      "hint": "Google Drive folder ID to place the new spreadsheet in (from the folder's URL: .../folders/{folder_id}). Leave blank to create it in My Drive's root, same as the Sheets API's own default. Requires the drive.file scope.",
+      "hint": "Google Drive folder ID to place the new spreadsheet in (from the folder's URL: .../folders/{folder_id}). Leave blank to create it in My Drive's root, same as the Sheets API's own default.",
       "data_type": "string",
       "required": false,
       "input_source": "variable",
