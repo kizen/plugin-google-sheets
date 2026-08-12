@@ -36,8 +36,16 @@ def column_number_to_letter(n):
     return letters
 
 
-def get_sheets_json(url, context):
-    resp = kizen.api.get(url)
+def resolve_positive_int(raw, name):
+    # Shared by header_row/header_column — both default to 1 and must be at least 1.
+    value = int(raw) if raw is not None else 1
+    if value < 1:
+        raise Exception(f"{name} must be 1 or greater, got {value}.")
+    return value
+
+
+def check_sheets_response(resp, context):
+    # Handles both proxy-level failures (resp.ok False) and upstream failures wrapped inside a 200 envelope.
     try:
         payload = resp.json()
     except Exception:
@@ -53,15 +61,8 @@ def get_sheets_json(url, context):
 spreadsheet_id = inputs.spreadsheet_id
 sheet_name = inputs.sheet_name
 
-header_row_input = getattr(inputs, "header_row", None)
-header_row = int(header_row_input) if header_row_input is not None else 1
-if header_row < 1:
-    raise Exception(f"header_row must be 1 or greater, got {header_row}.")
-
-header_column_input = getattr(inputs, "header_column", None)
-header_column = int(header_column_input) if header_column_input is not None else 1
-if header_column < 1:
-    raise Exception(f"header_column must be 1 or greater, got {header_column}.")
+header_row = resolve_positive_int(getattr(inputs, "header_row", None), "header_row")
+header_column = resolve_positive_int(getattr(inputs, "header_column", None), "header_column")
 
 row_number_raw = getattr(inputs, "row_number", None)
 match_column = getattr(inputs, "match_column", None)
@@ -98,7 +99,8 @@ if has_row_number:
 
     # Only the header row is needed here — row_number already tells us exactly where to write.
     header_range_param = quote(f"{quoted_sheet_name}!{header_row}:{header_row}", safe="")
-    header_body = get_sheets_json(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{header_range_param}", "reading header row")
+    header_resp = kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{header_range_param}")
+    header_body = check_sheets_response(header_resp, "reading header row")
     header_values = header_body.get("values", [])
     if not header_values:
         raise Exception(f"header_row {header_row} in sheet '{sheet_name}' has no headers to update against.")
@@ -107,7 +109,8 @@ if has_row_number:
 else:
     # match_column/match_value targeting needs the whole sheet to find (and disambiguate) the row.
     range_param = quote(quoted_sheet_name, safe="")
-    body = get_sheets_json(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{range_param}", "searching for row to update")
+    search_resp = kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{range_param}")
+    body = check_sheets_response(search_resp, "searching for row to update")
     values = body.get("values", [])
 
     if not values or header_row > len(values):
@@ -152,15 +155,7 @@ resp = kizen.api.post(
     f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values:batchUpdate",
     json={"valueInputOption": "USER_ENTERED", "data": batch_data},
 )
-
-try:
-    payload = resp.json()
-except Exception:
-    raise Exception(f"Google Sheets error updating row: unknown_error — HTTP {resp.status_code}")
-
-body = payload.get("body")
-if not resp.ok or payload.get("status_code", 200) >= 400 or not isinstance(body, dict):
-    raise_sheets_error(payload, "updating row", resp.status_code)
+check_sheets_response(resp, "updating row")
 
 outputs.row_number = row_number
 outputs.success = True
