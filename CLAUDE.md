@@ -228,7 +228,7 @@ No `header_row`/`header_column` inputs — there's no existing structure to reso
 
 **Bare-create path verified end-to-end**, all inputs: bare create; `folder_id` (visually confirmed placement in the target folder); `header_row_values` (confirmed via a raw read that the exact header values were written — a sheet with only a header row and no data rows correctly reports `row_count: 0` from `get_rows`, which isn't a bug, just headers never counting as a data row).
 
-**Template-copy path (`files.copy`, the `drive` scope, and the metadata-lookup call) is newly implemented and not yet live-tested** — needs the `drive` scope reconnected on both OAuth services before it can run at all.
+**Template-copy path confirmed working end-to-end**, including with a genuinely adversarial test: the template used was a spreadsheet created directly in the Google Sheets UI, never touched by this plugin's own API calls — exactly the case `drive.file` cannot reach, and full `drive` correctly could. A follow-up `get_rows` against the copy returned all 7 rows identical to the live template's current contents (not an empty shell), confirming `files.copy` genuinely duplicates data, and the metadata-lookup call correctly resolved the copied file's real sheet name.
 
 ---
 
