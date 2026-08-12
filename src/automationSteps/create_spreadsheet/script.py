@@ -32,6 +32,7 @@ def a1_quote_sheet_name(sheet_name):
 
 
 def check_sheets_response(resp, context):
+    # Handles both proxy-level failures (resp.ok False) and upstream failures wrapped inside a 200 envelope.
     try:
         payload = resp.json()
     except Exception:
@@ -42,6 +43,19 @@ def check_sheets_response(resp, context):
         raise_sheets_error(payload, context, resp.status_code)
 
     return body
+
+
+def resolve_first_sheet_name(response, context):
+    # Shared by both creation paths — each locates the first tab's title in a differently-shaped response.
+    sheets = response.get("sheets", [])
+    if not sheets:
+        raise Exception(f"Google API error {context}: response missing sheets: {response}")
+
+    sheet_name = sheets[0].get("properties", {}).get("title")
+    if not sheet_name:
+        raise Exception(f"Google API error {context}: response missing the first sheet's title: {response}")
+
+    return sheet_name
 
 
 spreadsheet_name = inputs.spreadsheet_name
@@ -60,9 +74,7 @@ if header_row_values_raw:
         raise Exception(f"header_row_values must be a JSON array (e.g. [\"Name\", \"Email\"]), got: {header_row_values_raw}")
 
 if template_spreadsheet_id:
-    # files.copy on a file this app didn't create requires full "drive" scope (Restricted) — drive.file
-    # only covers files the app itself created/opened. Setting parents here does the folder placement
-    # in the same call, so no separate move step is needed on this path (unlike the bare-create path).
+    # Setting parents here does the folder placement in the same call — no separate move step needed on this path.
     copy_body = {"name": spreadsheet_name}
     if folder_id:
         copy_body["parents"] = [folder_id]
@@ -79,19 +91,12 @@ if template_spreadsheet_id:
     if not new_spreadsheet_id:
         raise Exception(f"Google API error copying template spreadsheet: response missing id: {copy_response}")
 
-    # Drive's file resource doesn't expose the spreadsheet's internal sheets — a separate
-    # Sheets API metadata call is needed to find the first tab's name.
+    # Drive's file resource doesn't expose the spreadsheet's internal sheets, hence this separate metadata call.
     metadata = check_sheets_response(
         kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{new_spreadsheet_id}?fields=sheets.properties.title"),
         "reading copied spreadsheet's sheet names",
     )
-    sheets = metadata.get("sheets", [])
-    if not sheets:
-        raise Exception(f"Google API error copying template spreadsheet: response missing sheets: {metadata}")
-
-    sheet_name = sheets[0].get("properties", {}).get("title")
-    if not sheet_name:
-        raise Exception(f"Google API error copying template spreadsheet: response missing the first sheet's title: {metadata}")
+    sheet_name = resolve_first_sheet_name(metadata, "copying template spreadsheet")
 else:
     body = check_sheets_response(
         kizen.api.post(f"{BASE_URL}/v4/spreadsheets", json={"properties": {"title": spreadsheet_name}}),
@@ -99,13 +104,10 @@ else:
     )
 
     new_spreadsheet_id = body.get("spreadsheetId")
-    sheets = body.get("sheets", [])
-    if not new_spreadsheet_id or not sheets:
-        raise Exception(f"Google API error creating spreadsheet: response missing spreadsheetId/sheets: {body}")
+    if not new_spreadsheet_id:
+        raise Exception(f"Google API error creating spreadsheet: response missing spreadsheetId: {body}")
 
-    sheet_name = sheets[0].get("properties", {}).get("title")
-    if not sheet_name:
-        raise Exception(f"Google API error creating spreadsheet: response missing the new sheet's title: {body}")
+    sheet_name = resolve_first_sheet_name(body, "creating spreadsheet")
 
     if folder_id:
         # The create call always lands the file in My Drive's root — remove "root" as a parent and add folder_id via the Drive API.
