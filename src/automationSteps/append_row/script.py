@@ -37,8 +37,16 @@ def column_number_to_letter(n):
     return letters
 
 
-def get_sheets_json(url, context):
-    resp = kizen.api.get(url)
+def resolve_positive_int(raw, name):
+    # Shared by header_row/header_column — both default to 1 and must be at least 1.
+    value = int(raw) if raw is not None else 1
+    if value < 1:
+        raise Exception(f"{name} must be 1 or greater, got {value}.")
+    return value
+
+
+def check_sheets_response(resp, context):
+    # Handles both proxy-level failures (resp.ok False) and upstream failures wrapped inside a 200 envelope.
     try:
         payload = resp.json()
     except Exception:
@@ -54,15 +62,8 @@ def get_sheets_json(url, context):
 spreadsheet_id = inputs.spreadsheet_id
 sheet_name = inputs.sheet_name
 
-header_row_input = getattr(inputs, "header_row", None)
-header_row = int(header_row_input) if header_row_input is not None else 1
-if header_row < 1:
-    raise Exception(f"header_row must be 1 or greater, got {header_row}.")
-
-header_column_input = getattr(inputs, "header_column", None)
-header_column = int(header_column_input) if header_column_input is not None else 1
-if header_column < 1:
-    raise Exception(f"header_column must be 1 or greater, got {header_column}.")
+header_row = resolve_positive_int(getattr(inputs, "header_row", None), "header_row")
+header_column = resolve_positive_int(getattr(inputs, "header_column", None), "header_column")
 
 try:
     row_data = json.loads(inputs.row_data)
@@ -76,7 +77,8 @@ quoted_sheet_name = a1_quote_sheet_name(sheet_name)
 
 # Only the header row is needed to determine column order — no need to fetch the whole sheet.
 header_range_param = quote(f"{quoted_sheet_name}!{header_row}:{header_row}", safe="")
-header_body = get_sheets_json(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{header_range_param}", "reading header row")
+header_resp = kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{header_range_param}")
+header_body = check_sheets_response(header_resp, "reading header row")
 
 header_values = header_body.get("values", [])
 if not header_values:
@@ -98,15 +100,7 @@ append_url = (
 )
 
 resp = kizen.api.post(append_url, json={"values": [ordered_values]})
-
-try:
-    payload = resp.json()
-except Exception:
-    raise Exception(f"Google Sheets error appending row: unknown_error — HTTP {resp.status_code}")
-
-body = payload.get("body")
-if not resp.ok or payload.get("status_code", 200) >= 400 or not isinstance(body, dict):
-    raise_sheets_error(payload, "appending row", resp.status_code)
+body = check_sheets_response(resp, "appending row")
 
 updated_range = body.get("updates", {}).get("updatedRange", "")
 match = re.search(r"![A-Za-z]+(\d+)", updated_range)
