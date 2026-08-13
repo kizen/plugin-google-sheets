@@ -40,11 +40,9 @@ Any scope change requires reconnecting the OAuth connection — an existing toke
 
 **Why full `drive`, not `drive.file`.** `drive.file` only grants per-file access to files this app itself created or opened — fine for moving a spreadsheet the app just created via `folder_id`, but not for `template_spreadsheet_id`, which points at an arbitrary pre-existing spreadsheet the app has never touched. This is the exact situation `plugin-google-drive`'s `copy_file` action hit: `drive.readonly`/`drive.file` were insufficient there, only full `drive` worked. `drive` is Google-**Restricted**, which requires a CASA security assessment before production/general-availability use — not before testing with an explicit test-user allowlist, which is how this was built and verified. Moving this plugin to production requires that assessment; that's a deliberate, separate decision, not something resolved by this spike.
 
-Kizen's proxy resolves the upstream host per `service_name`, fixed to that service's `base_service_url`. The `shared` service is pinned to `sheets.googleapis.com`, so a second service, `shared_drive`, was added with identical `auth_credentials` and `base_service_url: https://www.googleapis.com`.
+Kizen's proxy resolves the upstream host per `service_name`, fixed to that service's `base_service_url` — normally one host per service. This plugin originally worked around that by declaring a second service, `shared_drive`, with `base_service_url: https://www.googleapis.com`, so Drive calls had somewhere to go. That required two separate OAuth authorization steps in the setup assistant (one per service, confirmed live, despite both referencing the same underlying OAuth client and encrypted `client_secret`).
 
-This requires two separate OAuth authorization steps in the setup assistant, one per service — confirmed live. Kizen's setup assistant treats `shared` and `shared_drive` as distinct connections despite sharing the same underlying OAuth client. The same encrypted `client_secret` value works correctly when referenced from both service entries.
-
-**`additional_service_urls`.** The `shared` service declares `"additional_service_urls": ["www.googleapis.com"]`, adopting a new platform field (alongside `sub_domain_regex_validation` and a proxy-level `full_domain` query param) that lets one service resolve to more than one upstream host. Added here only to exercise the new field on `kizen.json` — this plugin doesn't use it functionally: Sheets/Drive have no subdomain concept, and `shared_drive` already covers the `www.googleapis.com` host as its own service. The `sub_domain_regex_validation` field and `full_domain` routing itself are platform/proxy engine behavior, out of scope for this repo.
+**`additional_service_urls` / `full_domain` — verified working.** The `shared_drive` service has since been removed. The `shared` service now declares `"additional_service_urls": ["www.googleapis.com"]`, a platform field that lets one service resolve to more than one upstream host, selected per-request via a `full_domain` query param on the proxy call (e.g. `...&full_domain=www.googleapis.com`) rather than a second service definition. All Drive calls in `create_spreadsheet` (`files.copy`, `files.update`) now go through `shared` with that query param appended, instead of a `shared_drive`-scoped URL. Confirmed end-to-end: both the `folder_id` move and the `template_spreadsheet_id` copy succeeded through the single service, and only one OAuth authorization was needed on re-publish (down from two). The companion `sub_domain_regex_validation` field is unused here — Sheets/Drive have no subdomain concept, and `www.googleapis.com` is matched as a full literal host, not a `subdomain.root` pair.
 
 **Scope plan by action:**
 
@@ -52,8 +50,8 @@ This requires two separate OAuth authorization steps in the setup assistant, one
 | --- | --- | --- |
 | Get Rows, Search Rows, Append Row, Update Row/Cell | `spreadsheets` | Current. |
 | Create Spreadsheet — bare create | `spreadsheets` | No Drive scope needed. |
-| Create Spreadsheet — `folder_id` | `drive` via `shared_drive` | Current. (`drive.file` would have been sufficient for this alone, but `template_spreadsheet_id` on the same action needs full `drive` anyway — see above.) |
-| Create Spreadsheet — `template_spreadsheet_id` | `drive` via `shared_drive` | Current. Restricted scope — see above for the production/CASA implication. |
+| Create Spreadsheet — `folder_id` | `drive` via `shared` + `full_domain=www.googleapis.com` | Current. (`drive.file` would have been sufficient for this alone, but `template_spreadsheet_id` on the same action needs full `drive` anyway — see above.) |
+| Create Spreadsheet — `template_spreadsheet_id` | `drive` via `shared` + `full_domain=www.googleapis.com` | Current. Restricted scope — see above for the production/CASA implication. |
 | New Row Added trigger | None — no Sheets push mechanism | Cut from v1; see Known Constraints. |
 
 **Proxy URL pattern:**
@@ -209,8 +207,10 @@ Verified end-to-end for all three paths:
 File: `src/automationSteps/create_spreadsheet/script.py`
 
 **Two mutually exclusive creation paths, branching on `template_spreadsheet_id`:**
-- **Bare create** (no `template_spreadsheet_id`): `spreadsheets.create` via the `shared` service. `folder_id`, if set, needs a separate follow-up `files.update` (`addParents`/`removeParents=root`) via `shared_drive`, since the Sheets create call has no folder concept at all.
-- **Template copy** (`template_spreadsheet_id` set): `files.copy` on the template, via `shared_drive`, requiring full `drive` scope (Restricted) — see Auth Method for why `drive.file` isn't enough. `folder_id`, if set, is passed as `parents` directly in the same copy call, so no separate move step is needed on this path. Drive's file resource doesn't expose a spreadsheet's internal sheet list, so a second call — a Sheets API metadata fetch (`fields=sheets.properties.title`) via `shared` — is needed afterward to resolve the copied file's first tab name for the `sheet_name` output.
+- **Bare create** (no `template_spreadsheet_id`): `spreadsheets.create` via the `shared` service. `folder_id`, if set, needs a separate follow-up `files.update` (`addParents`/`removeParents=root`) — also via `shared`, using `full_domain=www.googleapis.com` to reach Drive, since the Sheets create call has no folder concept at all.
+- **Template copy** (`template_spreadsheet_id` set): `files.copy` on the template, via `shared` + `full_domain=www.googleapis.com`, requiring full `drive` scope (Restricted) — see Auth Method for why `drive.file` isn't enough. `folder_id`, if set, is passed as `parents` directly in the same copy call, so no separate move step is needed on this path. Drive's file resource doesn't expose a spreadsheet's internal sheet list, so a second call — a Sheets API metadata fetch (`fields=sheets.properties.title`) via `shared` (default host) — is needed afterward to resolve the copied file's first tab name for the `sheet_name` output.
+- Both Drive calls previously went through a second service, `shared_drive` — removed once `additional_service_urls`/`full_domain` was confirmed as a working replacement; see Auth Method.
+- **Confirmed behavior:** on a template copy, if `folder_id` isn't set, the copy lands in the *template's own* current folder — Drive's `files.copy` defaults a new file's parent to the source file's parent when `parents` is omitted from the request body. Not a bug; just Drive's own default.
 
 Either way, `header_row_values` (if set) is written the same way afterward, regardless of which path produced the spreadsheet.
 
@@ -231,6 +231,8 @@ No `header_row`/`header_column` inputs — there's no existing structure to reso
 **Bare-create path verified end-to-end**, all inputs: bare create; `folder_id` (visually confirmed placement in the target folder); `header_row_values` (confirmed via a raw read that the exact header values were written — a sheet with only a header row and no data rows correctly reports `row_count: 0` from `get_rows`, which isn't a bug, just headers never counting as a data row).
 
 **Template-copy path confirmed working end-to-end**, including with a genuinely adversarial test: the template used was a spreadsheet created directly in the Google Sheets UI, never touched by this plugin's own API calls — exactly the case `drive.file` cannot reach, and full `drive` correctly could. A follow-up `get_rows` against the copy returned all 7 rows identical to the live template's current contents (not an empty shell), confirming `files.copy` genuinely duplicates data, and the metadata-lookup call correctly resolved the copied file's real sheet name.
+
+**Re-verified after the `shared_drive` → `additional_service_urls` migration:** both `folder_id` (visually confirmed placement) and `template_spreadsheet_id` (copy succeeded, correctly defaulted to the template's own folder when `folder_id` wasn't set) still work with Drive calls routed through `shared` + `full_domain=www.googleapis.com` instead of the old `shared_drive` service.
 
 ---
 

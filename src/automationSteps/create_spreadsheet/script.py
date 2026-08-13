@@ -4,8 +4,8 @@ from urllib.parse import quote
 # Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
 BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_explore_feasibility_of_google_sheets_integration/shared"
 
-# Drive API call (www.googleapis.com), so it needs its own service — "shared" is pinned to sheets.googleapis.com; same MUST-revert caveat as BASE_URL applies here too.
-DRIVE_BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_explore_feasibility_of_google_sheets_integration/shared_drive"
+# Drive API calls (www.googleapis.com) route through this same service via additional_service_urls in kizen.json, selected per-request with this query param.
+DRIVE_FULL_DOMAIN_PARAM = "full_domain=www.googleapis.com"
 
 
 def raise_sheets_error(payload, context, fallback_status):
@@ -81,7 +81,7 @@ if template_spreadsheet_id:
 
     copy_response = check_sheets_response(
         kizen.api.post(
-            f"{DRIVE_BASE_URL}/drive/v3/files/{template_spreadsheet_id}/copy?supportsAllDrives=true&fields=id",
+            f"{BASE_URL}/drive/v3/files/{template_spreadsheet_id}/copy?supportsAllDrives=true&fields=id&{DRIVE_FULL_DOMAIN_PARAM}",
             json=copy_body,
         ),
         "copying template spreadsheet",
@@ -112,8 +112,8 @@ else:
     if folder_id:
         # The create call always lands the file in My Drive's root — remove "root" as a parent and add folder_id via the Drive API.
         move_url = (
-            f"{DRIVE_BASE_URL}/drive/v3/files/{new_spreadsheet_id}"
-            f"?addParents={quote(folder_id, safe='')}&removeParents=root&fields=id,parents"
+            f"{BASE_URL}/drive/v3/files/{new_spreadsheet_id}"
+            f"?addParents={quote(folder_id, safe='')}&removeParents=root&fields=id,parents&{DRIVE_FULL_DOMAIN_PARAM}"
         )
         check_sheets_response(kizen.api.patch(move_url, json={}), "moving spreadsheet into folder_id")
 
