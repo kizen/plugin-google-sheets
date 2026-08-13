@@ -44,6 +44,8 @@ Kizen's proxy resolves the upstream host per `service_name`, fixed to that servi
 
 This requires two separate OAuth authorization steps in the setup assistant, one per service — confirmed live. Kizen's setup assistant treats `shared` and `shared_drive` as distinct connections despite sharing the same underlying OAuth client. The same encrypted `client_secret` value works correctly when referenced from both service entries.
 
+**`additional_service_urls`.** The `shared` service declares `"additional_service_urls": ["www.googleapis.com"]`, adopting a new platform field (alongside `sub_domain_regex_validation` and a proxy-level `full_domain` query param) that lets one service resolve to more than one upstream host. Added here only to exercise the new field on `kizen.json` — this plugin doesn't use it functionally: Sheets/Drive have no subdomain concept, and `shared_drive` already covers the `www.googleapis.com` host as its own service. The `sub_domain_regex_validation` field and `full_domain` routing itself are platform/proxy engine behavior, out of scope for this repo.
+
 **Scope plan by action:**
 
 | Action | Scope | Notes |
