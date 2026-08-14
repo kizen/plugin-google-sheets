@@ -1,9 +1,9 @@
 {
-  "name": "Get Rows",
+  "name": "Get Rows - Number Input",
   "plugin_description": "Integrates with Google Sheets to read, search, and write rows from Kizen agentic workflows.",
-  "action_description": "Fetches rows from a sheet, keyed by header name. Optionally filter to rows whose filter_column cell exactly matches filter_value.",
+  "action_description": "Demo copy of Get Rows, kept unchanged with data_type: number header_row/header_column inputs to illustrate the framework's optional-numeric-input crash (see CLAUDE.md). Not part of the core v1 action set.",
   "runtime": "python-3-13",
-  "action_type": "google_sheets_get_rows",
+  "action_type": "google_sheets_get_rows_number_input",
   "script": "script.py",
   "inputs": [
     {
@@ -27,20 +27,22 @@
     {
       "name": "header_row",
       "label": "Header Row",
-      "hint": "Which row contains the column headers (1-indexed). Leave blank to default to 1.",
-      "data_type": "string",
+      "hint": "Which row contains the column headers (1-indexed).",
+      "data_type": "number",
       "required": false,
       "input_source": "variable",
-      "script_alias": "header_row"
+      "script_alias": "header_row",
+      "default": 1
     },
     {
       "name": "header_column",
       "label": "Header Column",
-      "hint": "Which column the headers start in (1-indexed). Columns to the left are skipped entirely, e.g. a leading row-label column. Leave blank to default to 1.",
-      "data_type": "string",
+      "hint": "Which column the headers start in (1-indexed). Columns to the left are skipped entirely, e.g. a leading row-label column.",
+      "data_type": "number",
       "required": false,
       "input_source": "variable",
-      "script_alias": "header_column"
+      "script_alias": "header_column",
+      "default": 1
     },
     {
       "name": "filter_column",

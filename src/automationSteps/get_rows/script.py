@@ -29,8 +29,13 @@ def a1_quote_sheet_name(name):
 
 
 def resolve_positive_int(raw, name):
-    # Shared by header_row/header_column — both default to 1 and must be at least 1.
-    value = int(raw) if raw is not None else 1
+    # header_row/header_column are string inputs (a number-typed optional input crashes the whole run when blank) — blank defaults to 1.
+    if not raw:
+        return 1
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise Exception(f"{name} must be a whole number, got '{raw}'.")
     if value < 1:
         raise Exception(f"{name} must be 1 or greater, got {value}.")
     return value

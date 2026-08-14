@@ -94,8 +94,8 @@ File: `src/automationSteps/get_rows/script.py`
 | --- | --- | --- | --- |
 | `spreadsheet_id` | string | yes | From the sheet's URL. |
 | `sheet_name` | string | yes | Tab name. Always quoted in A1 notation. |
-| `header_row` | number | yes | 1-indexed header row, default `1`. `required: true` with a `default` — see Known Constraints for why an optional numeric input doesn't work. |
-| `header_column` | number | yes | 1-indexed header column, default `1`. Columns to the left are dropped from both headers and data. |
+| `header_row` | string | no | 1-indexed header row. Blank defaults to `1` (script-side, not a platform `default`) — see Known Constraints for why this is a string, not a number. |
+| `header_column` | string | no | 1-indexed header column. Blank defaults to `1`. Columns to the left are dropped from both headers and data. |
 | `filter_column` | string | no | Header name to filter on. |
 | `filter_value` | string | no | Required if `filter_column` is set; exact match only. |
 
@@ -114,7 +114,11 @@ Also confirmed: publishing is required before a plugin can be installed for test
 
 `values.get` without `valueRenderOption` returns `FORMATTED_VALUE` (display strings, e.g. `"11/19/1990"`), not raw values.
 
-**Framework limitation — optional numeric inputs.** An input with `data_type: "number"` and `required: false` crashes the entire run (`KizenConversionError: Failed to convert value '' to float`) before the script executes, whenever the field is left blank — the runtime unconditionally calls `float()` on the raw value regardless of whether the input is required. `string` inputs don't have this problem. Adding a `"default"` while keeping `required: false` does not help — `default` only pre-fills the UI when `required: true`. The only fix: mark the input `required: true` with a `"default"` (precedent: `plugin-mysql`'s `mysql_read.return_single_value`). Any future numeric input on this plugin should follow this pattern.
+**Framework limitation — optional numeric inputs.** An input with `data_type: "number"` and `required: false` crashes the entire run (`KizenConversionError: Failed to convert value '' to float`) before the script executes, whenever the field is left blank — the runtime unconditionally calls `float()` on the raw value regardless of whether the input is required. `string` inputs don't have this problem. Adding a `"default"` while keeping `required: false` does not help — `default` only pre-fills the UI when `required: true`.
+
+`header_row`/`header_column` originally worked around this the same way as `plugin-mysql`'s `mysql_read.return_single_value`: `required: true` with a `"default"`. That avoids the crash, but forces every caller to always see a prefilled value rather than a genuinely optional field. These two inputs have since been migrated to the pattern used by `update_row`'s `row_number`: `data_type: "string"`, `required: false`, no platform `default` — the script's `resolve_positive_int` helper treats a blank/omitted value as `1` and raises a clear error on a non-numeric string, instead of the raw `KizenConversionError`. This is now the preferred pattern for any future numeric-like input on this plugin; the `required: true` + `default` workaround is a fallback only where genuine optionality isn't needed.
+
+**Demo action — `get_rows_number_input`.** A duplicate of `get_rows` (`src/automationSteps/get_rows_number_input/`) was kept unchanged with the original `data_type: "number"`, `required: true`, `default: 1` `header_row`/`header_column` inputs, to demo the design constraint side-by-side with the fix. That combination doesn't crash — `required: true` was exactly the workaround for the crash — but it means the field can never be genuinely left blank: the platform always shows a prefilled `1`, and switching it to `required: false` to make it truly optional is what triggers `KizenConversionError` on a blank value. `get_rows` now uses `header_row`/`header_column` as optional strings instead, which are genuinely blank-able with no crash risk either way. Not part of the core v1 action set; safe to delete after the demo.
 
 ### search_rows
 
@@ -281,6 +285,9 @@ plugin-google-sheets/
 └── src/
     └── automationSteps/
         ├── get_rows/
+        │   ├── config.json
+        │   └── script.py
+        ├── get_rows_number_input/  # demo-only, see Known Constraints
         │   ├── config.json
         │   └── script.py
         ├── search_rows/

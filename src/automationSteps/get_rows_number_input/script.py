@@ -29,13 +29,8 @@ def a1_quote_sheet_name(name):
 
 
 def resolve_positive_int(raw, name):
-    # header_row/header_column are string inputs (a number-typed optional input crashes the whole run when blank) — blank defaults to 1.
-    if not raw:
-        return 1
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        raise Exception(f"{name} must be a whole number, got '{raw}'.")
+    # Shared by header_row/header_column — both default to 1 and must be at least 1.
+    value = int(raw) if raw is not None else 1
     if value < 1:
         raise Exception(f"{name} must be 1 or greater, got {value}.")
     return value
@@ -57,46 +52,45 @@ def check_sheets_response(resp, context):
 
 spreadsheet_id = inputs.spreadsheet_id
 sheet_name = inputs.sheet_name
-column_name = inputs.column_name
-match_value = inputs.match_value
-return_all_matches = inputs.return_all_matches
+filter_column = getattr(inputs, "filter_column", None)
+filter_value = getattr(inputs, "filter_value", None)
 
 header_row = resolve_positive_int(getattr(inputs, "header_row", None), "header_row")
 header_column = resolve_positive_int(getattr(inputs, "header_column", None), "header_column")
 
+if filter_column and not filter_value:
+    raise Exception("filter_value is required when filter_column is set.")
+
 range_param = quote(a1_quote_sheet_name(sheet_name), safe="")
 
 resp = kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{range_param}")
-body = check_sheets_response(resp, "searching rows")
+body = check_sheets_response(resp, "reading rows")
 
 values = body.get("values", [])
 
-if not values or header_row > len(values):
-    outputs.matching_rows = json.dumps([])
-    outputs.row_numbers = json.dumps([])
+if not values:
+    outputs.rows = json.dumps([])
+    outputs.row_count = 0
 else:
+    if header_row > len(values):
+        raise Exception(f"header_row {header_row} exceeds sheet '{sheet_name}' row count ({len(values)}).")
+
     header_row_values = values[header_row - 1]
     if header_column > len(header_row_values):
         raise Exception(f"header_column {header_column} exceeds header row's column count ({len(header_row_values)}) in sheet '{sheet_name}'.")
 
     headers = header_row_values[header_column - 1:]
-    if column_name not in headers:
-        raise Exception(f"column_name '{column_name}' is not a header in sheet '{sheet_name}'. Headers: {headers}")
+    data_rows = [row[header_column - 1:] for row in values[header_row:]]
 
-    matching_rows = []
-    row_numbers = []
-    # offset is 0-indexed within data rows; the real (1-indexed) sheet row for offset 0 is header_row + 1.
-    for offset, data_row in enumerate(values[header_row:]):
-        sliced_row = data_row[header_column - 1:]
-        row = {header: (sliced_row[i] if i < len(sliced_row) else "") for i, header in enumerate(headers)}
-        if row.get(column_name) != match_value:
+    if filter_column and filter_column not in headers:
+        raise Exception(f"filter_column '{filter_column}' is not a header in sheet '{sheet_name}'. Headers: {headers}")
+
+    rows = []
+    for data_row in data_rows:
+        row = {header: (data_row[i] if i < len(data_row) else "") for i, header in enumerate(headers)}
+        if filter_column and row.get(filter_column) != filter_value:
             continue
+        rows.append(row)
 
-        matching_rows.append(row)
-        row_numbers.append(header_row + offset + 1)
-
-        if not return_all_matches:
-            break
-
-    outputs.matching_rows = json.dumps(matching_rows)
-    outputs.row_numbers = json.dumps(row_numbers)
+    outputs.rows = json.dumps(rows)
+    outputs.row_count = len(rows)

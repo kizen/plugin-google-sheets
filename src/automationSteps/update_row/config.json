@@ -27,22 +27,20 @@
     {
       "name": "header_row",
       "label": "Header Row",
-      "hint": "Which row contains the column headers (1-indexed).",
-      "data_type": "number",
-      "required": true,
+      "hint": "Which row contains the column headers (1-indexed). Leave blank to default to 1.",
+      "data_type": "string",
+      "required": false,
       "input_source": "variable",
-      "script_alias": "header_row",
-      "default": 1
+      "script_alias": "header_row"
     },
     {
       "name": "header_column",
       "label": "Header Column",
-      "hint": "Which column the headers start in (1-indexed). Columns to the left are ignored.",
-      "data_type": "number",
-      "required": true,
+      "hint": "Which column the headers start in (1-indexed). Columns to the left are ignored. Leave blank to default to 1.",
+      "data_type": "string",
+      "required": false,
       "input_source": "variable",
-      "script_alias": "header_column",
-      "default": 1
+      "script_alias": "header_column"
     },
     {
       "name": "row_number",
