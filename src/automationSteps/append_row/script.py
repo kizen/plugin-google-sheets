@@ -89,7 +89,11 @@ header_values = header_body.get("values", [])
 if not header_values:
     raise Exception(f"header_row {header_row} in sheet '{sheet_name}' has no headers to append against.")
 
-headers = header_values[0][header_column - 1:]
+header_row_values = header_values[0]
+if header_column > len(header_row_values):
+    raise Exception(f"header_column {header_column} exceeds header row's column count ({len(header_row_values)}) in sheet '{sheet_name}'.")
+
+headers = header_row_values[header_column - 1:]
 
 unknown_keys = [key for key in row_data if key not in headers]
 if unknown_keys:

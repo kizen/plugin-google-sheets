@@ -110,7 +110,11 @@ if has_row_number:
     if not header_values:
         raise Exception(f"header_row {header_row} in sheet '{sheet_name}' has no headers to update against.")
 
-    headers = header_values[0][header_column - 1:]
+    header_row_values = header_values[0]
+    if header_column > len(header_row_values):
+        raise Exception(f"header_column {header_column} exceeds header row's column count ({len(header_row_values)}) in sheet '{sheet_name}'.")
+
+    headers = header_row_values[header_column - 1:]
 else:
     # match_column/match_value targeting needs the whole sheet to find (and disambiguate) the row.
     range_param = quote(quoted_sheet_name, safe="")

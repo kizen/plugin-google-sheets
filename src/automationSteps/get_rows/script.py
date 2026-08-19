@@ -65,6 +65,8 @@ header_column = resolve_positive_int(getattr(inputs, "header_column", None), "he
 
 if filter_column and not filter_value:
     raise Exception("filter_value is required when filter_column is set.")
+if filter_value and not filter_column:
+    raise Exception("filter_column is required when filter_value is set.")
 
 range_param = quote(a1_quote_sheet_name(sheet_name), safe="")
 
