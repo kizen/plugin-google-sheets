@@ -12,9 +12,10 @@ Per the spike ticket: Get Rows / Read Range, Search Rows, Append Row, Update Row
 2. **Search Rows** — finds rows by exact column value; returns matches and their real sheet row numbers. Built.
 3. **Append Row** — adds a row via a single JSON object keyed by header name (no dynamic per-column inputs — see below). Built.
 4. **Update Row/Cell** — updates specific cells within one row, targeted by row number or column match, without touching the rest of the row. Built.
-5. **Create Spreadsheet/Tab** — creates a new spreadsheet (blank or copied from an existing spreadsheet as a template), optionally with a header row and target Drive folder. Built.
 
 No trigger was built — see Known Constraints.
+
+**Create Spreadsheet/Tab was built and fully verified during the spike** (both a bare create and a template-copy path, including `folder_id` placement) but has since been removed from the v1 action set, along with its Drive dependency. All four remaining actions are Sheets-only — see Auth Method below for the resulting scope.
 
 ---
 
@@ -30,28 +31,20 @@ No trigger was built — see Known Constraints.
 
 | Scope | Classification | Purpose |
 | --- | --- | --- |
-| `spreadsheets` | Sensitive, not Restricted | Read/write for all core actions. Upgraded from `spreadsheets.readonly` when Append Row required write access. |
-| `drive` | **Restricted** | Lets Create Spreadsheet's `folder_id` move a newly created file, and `template_spreadsheet_id` copy an existing file this app didn't create. See below for why `drive.file` isn't sufficient. |
+| `spreadsheets` | Sensitive, not Restricted | Read/write for all four actions. Upgraded from `spreadsheets.readonly` when Append Row required write access. |
 | `userinfo.email`, `userinfo.profile` | — | "Connected as {email}" in the setup assistant. |
 
-`spreadsheets`/`spreadsheets.readonly` are Sensitive but not Restricted — no annual CASA assessment, unlike Drive's `drive`/`drive.readonly`. Confirmed against [Google's Sheets API scopes docs](https://developers.google.com/workspace/sheets/api/scopes).
+`spreadsheets`/`spreadsheets.readonly` are Sensitive but not Restricted — no annual CASA assessment required. Confirmed against [Google's Sheets API scopes docs](https://developers.google.com/workspace/sheets/api/scopes).
 
 Any scope change requires reconnecting the OAuth connection — an existing token doesn't retroactively gain a new scope — and adding the scope to the GCP OAuth consent screen's own scope list; declaring it in `kizen.json` alone is not sufficient.
 
-**Why full `drive`, not `drive.file`.** `drive.file` only grants per-file access to files this app itself created or opened — fine for moving a spreadsheet the app just created via `folder_id`, but not for `template_spreadsheet_id`, which points at an arbitrary pre-existing spreadsheet the app has never touched. This is the exact situation `plugin-google-drive`'s `copy_file` action hit: `drive.readonly`/`drive.file` were insufficient there, only full `drive` worked. `drive` is Google-**Restricted**, which requires a CASA security assessment before production/general-availability use — not before testing with an explicit test-user allowlist, which is how this was built and verified. Moving this plugin to production requires that assessment; that's a deliberate, separate decision, not something resolved by this spike.
-
-Kizen's proxy resolves the upstream host per `service_name`, fixed to that service's `base_service_url` — normally one host per service. This plugin originally worked around that by declaring a second service, `shared_drive`, with `base_service_url: https://www.googleapis.com`, so Drive calls had somewhere to go. That required two separate OAuth authorization steps in the setup assistant (one per service, confirmed live, despite both referencing the same underlying OAuth client and encrypted `client_secret`).
-
-**`additional_service_urls` / `full_domain` — verified working.** The `shared_drive` service has since been removed. The `shared` service now declares `"additional_service_urls": ["www.googleapis.com"]`, a platform field that lets one service resolve to more than one upstream host, selected per-request via a `full_domain` query param on the proxy call (e.g. `...&full_domain=www.googleapis.com`) rather than a second service definition. All Drive calls in `create_spreadsheet` (`files.copy`, `files.update`) now go through `shared` with that query param appended, instead of a `shared_drive`-scoped URL. Confirmed end-to-end: both the `folder_id` move and the `template_spreadsheet_id` copy succeeded through the single service, and only one OAuth authorization was needed on re-publish (down from two). The companion `sub_domain_regex_validation` field is unused here — Sheets/Drive have no subdomain concept, and `www.googleapis.com` is matched as a full literal host, not a `subdomain.root` pair.
+**Historical note — Drive scope, removed.** Create Spreadsheet/Tab (removed from v1; see What This Plugin Does) needed Google's full `drive` scope — Restricted, requiring a CASA security assessment before production use — because `template_spreadsheet_id` could point at a spreadsheet this app never created, a case `drive.file` can't reach. That action also drove a platform-level finding worth keeping: Kizen's proxy pins one host per `service_name`, so reaching both `sheets.googleapis.com` and `www.googleapis.com` (Drive) from one service required a second service definition (`shared_drive`) — until `additional_service_urls` + a per-request `full_domain` query param was confirmed as a working replacement, letting one service reach both hosts with one OAuth connection. With Create Spreadsheet/Tab gone, `drive` and `additional_service_urls` are no longer requested/declared at all — see `kizen.json`. If Drive-backed functionality returns to this plugin later, this mechanism is the confirmed path, not `shared_drive`-style multi-service.
 
 **Scope plan by action:**
 
 | Action | Scope | Notes |
 | --- | --- | --- |
-| Get Rows, Search Rows, Append Row, Update Row/Cell | `spreadsheets` | Current. |
-| Create Spreadsheet — bare create | `spreadsheets` | No Drive scope needed. |
-| Create Spreadsheet — `folder_id` | `drive` via `shared` + `full_domain=www.googleapis.com` | Current. (`drive.file` would have been sufficient for this alone, but `template_spreadsheet_id` on the same action needs full `drive` anyway — see above.) |
-| Create Spreadsheet — `template_spreadsheet_id` | `drive` via `shared` + `full_domain=www.googleapis.com` | Current. Restricted scope — see above for the production/CASA implication. |
+| Get Rows, Search Rows, Append Row, Update Row/Cell | `spreadsheets` | Current — the only scope this plugin requests. |
 | New Row Added trigger | None — no Sheets push mechanism | Cut from v1; see Known Constraints. |
 
 **Proxy URL pattern:**
@@ -118,7 +111,7 @@ Also confirmed: publishing is required before a plugin can be installed for test
 
 `header_row`/`header_column` originally worked around this the same way as `plugin-mysql`'s `mysql_read.return_single_value`: `required: true` with a `"default"`. That avoids the crash, but forces every caller to always see a prefilled value rather than a genuinely optional field. These two inputs have since been migrated to the pattern used by `update_row`'s `row_number`: `data_type: "string"`, `required: false`, no platform `default` — the script's `resolve_positive_int` helper treats a blank/omitted value as `1` and raises a clear error on a non-numeric string, instead of the raw `KizenConversionError`. This is now the preferred pattern for any future numeric-like input on this plugin; the `required: true` + `default` workaround is a fallback only where genuine optionality isn't needed.
 
-**Demo action — `get_rows_number_input`.** A duplicate of `get_rows` (`src/automationSteps/get_rows_number_input/`) was kept unchanged with the original `data_type: "number"`, `required: true`, `default: 1` `header_row`/`header_column` inputs, to demo the design constraint side-by-side with the fix. That combination doesn't crash — `required: true` was exactly the workaround for the crash — but it means the field can never be genuinely left blank: the platform always shows a prefilled `1`, and switching it to `required: false` to make it truly optional is what triggers `KizenConversionError` on a blank value. `get_rows` now uses `header_row`/`header_column` as optional strings instead, which are genuinely blank-able with no crash risk either way. Not part of the core v1 action set; safe to delete after the demo.
+A demo-only duplicate of `get_rows`, `get_rows_number_input`, was kept temporarily with the original `data_type: "number"` inputs to show this design constraint side-by-side with the fix live; it has since been removed after serving that purpose.
 
 ### search_rows
 
@@ -206,37 +199,7 @@ Verified end-to-end for all three paths:
 - Unique `match_column`/`match_value`: resolved to the correct row.
 - Ambiguous match: correctly rejected, listing the exact conflicting row numbers.
 
-### create_spreadsheet
-
-File: `src/automationSteps/create_spreadsheet/script.py`
-
-**Two mutually exclusive creation paths, branching on `template_spreadsheet_id`:**
-- **Bare create** (no `template_spreadsheet_id`): `spreadsheets.create` via the `shared` service. `folder_id`, if set, needs a separate follow-up `files.update` (`addParents`/`removeParents=root`) — also via `shared`, using `full_domain=www.googleapis.com` to reach Drive, since the Sheets create call has no folder concept at all.
-- **Template copy** (`template_spreadsheet_id` set): `files.copy` on the template, via `shared` + `full_domain=www.googleapis.com`, requiring full `drive` scope (Restricted) — see Auth Method for why `drive.file` isn't enough. `folder_id`, if set, is passed as `parents` directly in the same copy call, so no separate move step is needed on this path. Drive's file resource doesn't expose a spreadsheet's internal sheet list, so a second call — a Sheets API metadata fetch (`fields=sheets.properties.title`) via `shared` (default host) — is needed afterward to resolve the copied file's first tab name for the `sheet_name` output.
-- Both Drive calls previously went through a second service, `shared_drive` — removed once `additional_service_urls`/`full_domain` was confirmed as a working replacement; see Auth Method.
-- **Confirmed behavior:** on a template copy, if `folder_id` isn't set, the copy lands in the *template's own* current folder — Drive's `files.copy` defaults a new file's parent to the source file's parent when `parents` is omitted from the request body. Not a bug; just Drive's own default.
-
-Either way, `header_row_values` (if set) is written the same way afterward, regardless of which path produced the spreadsheet.
-
-No `header_row`/`header_column` inputs — there's no existing structure to resolve against for a bare create; headers always land at A1. (A template copy *does* inherit whatever structure the template already had — `header_row_values`, if set, still only touches row 1.)
-
-| Input | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `spreadsheet_name` | string | yes | Title for the new spreadsheet. Named `spreadsheet_name`, not `name` — `name` is a reserved API name (see Known Constraints). |
-| `template_spreadsheet_id` | string | no | Spreadsheet ID to copy as a template. Requires `drive` (Restricted) — see Auth Method. |
-| `header_row_values` | string | no | JSON array of header names, written into row 1. Uses `valueInputOption=RAW`, unlike `append_row`/`update_row`'s `USER_ENTERED` — headers should never be auto-formatted. On a template copy, this overwrites row 1 of whatever the template already had there. |
-| `folder_id` | string | no | Drive folder ID to place the new spreadsheet into. |
-
-| Output | Type | Notes |
-| --- | --- | --- |
-| `spreadsheet_id` | string | The new (or copied) spreadsheet's ID. |
-| `sheet_name` | string | The first tab's name. For a bare create this is Google's own default (`Sheet1`); for a template copy, it's whatever the template's first tab was actually called — either way, parsed from the real response rather than assumed. |
-
-**Bare-create path verified end-to-end**, all inputs: bare create; `folder_id` (visually confirmed placement in the target folder); `header_row_values` (confirmed via a raw read that the exact header values were written — a sheet with only a header row and no data rows correctly reports `row_count: 0` from `get_rows`, which isn't a bug, just headers never counting as a data row).
-
-**Template-copy path confirmed working end-to-end**, including with a genuinely adversarial test: the template used was a spreadsheet created directly in the Google Sheets UI, never touched by this plugin's own API calls — exactly the case `drive.file` cannot reach, and full `drive` correctly could. A follow-up `get_rows` against the copy returned all 7 rows identical to the live template's current contents (not an empty shell), confirming `files.copy` genuinely duplicates data, and the metadata-lookup call correctly resolved the copied file's real sheet name.
-
-**Re-verified after the `shared_drive` → `additional_service_urls` migration:** both `folder_id` (visually confirmed placement) and `template_spreadsheet_id` (copy succeeded, correctly defaulted to the template's own folder when `folder_id` wasn't set) still work with Drive calls routed through `shared` + `full_domain=www.googleapis.com` instead of the old `shared_drive` service.
+**Create Spreadsheet/Tab (`create_spreadsheet`) was built and fully verified here** — bare create, `folder_id` placement, and `template_spreadsheet_id` template copying (including via `additional_service_urls`/`full_domain`, see Auth Method) all worked end-to-end — but the action has since been removed from the v1 set, along with its Drive scope dependency. See git history on this branch (`fb1dfe0`, `4b14bbc`, `dcdf781`, `1784531`) for the implementation if this is revisited later.
 
 ---
 
@@ -244,16 +207,16 @@ No `header_row`/`header_column` inputs — there's no existing structure to reso
 
 **New Row Added trigger — investigated, cut from v1.**
 - The Sheets API has no watch/push mechanism (Drive has a dedicated [push notifications guide](https://developers.google.com/workspace/drive/api/guides/push); the equivalent Sheets URL 404s).
-- Drive's `files.watch` can technically target a spreadsheet's file ID (now feasible scope-wise, with `drive` in hand), but delivers little over polling: notifications are throttled to ~3 minutes minimum and carry no row/cell detail — still need a `get_rows`/`search_rows` follow-up and your own diff logic either way.
+- Drive's `files.watch` can technically target a spreadsheet's file ID, but would require re-adding the `drive` scope (see Auth Method — no longer requested) and delivers little over polling anyway: notifications are throttled to ~3 minutes minimum and carry no row/cell detail — still need a `get_rows`/`search_rows` follow-up and your own diff logic either way.
 - No plugin in this workspace defines a trigger — Scheduled and Webhook triggers are native Kizen primitives. Drive's `watch_drive_changes` action registers Kizen's own Webhook trigger URL with Google; it isn't a trigger itself.
 - Practical implication: polling requires no new plugin code. A native Scheduled trigger paired with `get_rows`/`search_rows` already supports "check periodically" — the remaining piece (diffing against last-seen state) belongs in the workflow.
 - An Apps Script bridge is technically feasible (the [Apps Script API](https://developers.google.com/apps-script/api/how-tos/manage-projects) can create and deploy a script bound to a sheet) but requires a third Google API, a new OAuth scope (classification unconfirmed), a different runtime, and installable triggers that typically must be registered from within Apps Script itself. Large enough to warrant its own spike.
 
 **`developer_business_id.staging`** was copied from `plugin-google-drive`'s `kizen.json`, assumed to be the shared staging test business. Confirmed correct for this repo.
 
-**Reserved names apply to inputs, not just outputs.** `plugin-google-drive` hit this on an output (`files` → `matching_files`); this plugin hit it on an input (`name` → `spreadsheet_name`). No published list of reserved names exists — the shortest, most generic word is the first suspect.
+**Reserved names apply to inputs, not just outputs.** `plugin-google-drive` hit this on an output (`files` → `matching_files`); this plugin hit it on an input (`name` → `spreadsheet_name`, on the now-removed `create_spreadsheet` action). No published list of reserved names exists — the shortest, most generic word is the first suspect.
 
-**GCP project** is dedicated to this plugin, not shared with Drive/Calendar. The Drive API is enabled, and the `drive` scope (Restricted) is requested for `folder_id`/`template_spreadsheet_id`. The Apps Script API is not enabled, and stays off until a concrete need arises. Moving to production requires the CASA assessment that `drive` triggers — not done, and a deliberate separate decision (see Auth Method).
+**GCP project** is dedicated to this plugin, not shared with Drive/Calendar. The Drive API was enabled solely for the now-removed `create_spreadsheet` action; with `drive` no longer requested (see Auth Method), there's no current CASA obligation. The Apps Script API is not enabled, and stays off until a concrete need arises.
 
 ---
 
@@ -287,19 +250,13 @@ plugin-google-sheets/
         ├── get_rows/
         │   ├── config.json
         │   └── script.py
-        ├── get_rows_number_input/  # demo-only, see Known Constraints
-        │   ├── config.json
-        │   └── script.py
         ├── search_rows/
         │   ├── config.json
         │   └── script.py
         ├── append_row/
         │   ├── config.json
         │   └── script.py
-        ├── update_row/
-        │   ├── config.json
-        │   └── script.py
-        └── create_spreadsheet/
+        └── update_row/
             ├── config.json
             └── script.py
 ```
