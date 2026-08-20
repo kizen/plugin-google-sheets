@@ -54,6 +54,11 @@ def check_sheets_response(resp, context):
     return body
 
 
+def row_from_cells(data_row, headers):
+    # Sheets omits trailing empty cells from a row entirely, so a row can be shorter than headers — pad missing cells with "".
+    return {header: (data_row[i] if i < len(data_row) else "") for i, header in enumerate(headers)}
+
+
 spreadsheet_id = inputs.spreadsheet_id
 sheet_name = inputs.sheet_name
 column_name = inputs.column_name
@@ -87,7 +92,7 @@ else:
     # offset is 0-indexed within data rows; the real (1-indexed) sheet row for offset 0 is header_row + 1.
     for offset, data_row in enumerate(values[header_row:]):
         sliced_row = data_row[header_column - 1:]
-        row = {header: (sliced_row[i] if i < len(sliced_row) else "") for i, header in enumerate(headers)}
+        row = row_from_cells(sliced_row, headers)
         if row.get(column_name) != match_value:
             continue
 
