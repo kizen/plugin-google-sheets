@@ -54,6 +54,11 @@ def check_sheets_response(resp, context):
     return body
 
 
+def row_from_cells(data_row, headers):
+    # Sheets omits trailing empty cells from a row entirely, so a row can be shorter than headers — pad missing cells with "".
+    return {header: (data_row[i] if i < len(data_row) else "") for i, header in enumerate(headers)}
+
+
 spreadsheet_id = inputs.spreadsheet_id
 sheet_name = inputs.sheet_name
 filter_column = getattr(inputs, "filter_column", None)
@@ -93,7 +98,7 @@ else:
 
     rows = []
     for data_row in data_rows:
-        row = {header: (data_row[i] if i < len(data_row) else "") for i, header in enumerate(headers)}
+        row = row_from_cells(data_row, headers)
         if filter_column and row.get(filter_column) != filter_value:
             continue
         rows.append(row)
