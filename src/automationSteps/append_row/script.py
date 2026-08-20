@@ -101,19 +101,21 @@ if unknown_keys:
 ordered_values = [str(row_data.get(header, "")) for header in headers]
 
 start_column_letter = column_number_to_letter(header_column)
+# Anchor at the header row itself — values.append finds the first empty row below it within this column range on its own.
 append_range_param = quote(f"{quoted_sheet_name}!{start_column_letter}{header_row}", safe="")
 append_url = (
     f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{append_range_param}:append"
     f"?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS"
 )
 
-resp = kizen.api.post(append_url, json={"values": [ordered_values]})
-body = check_sheets_response(resp, "appending row")
+append_resp = kizen.api.post(append_url, json={"values": [ordered_values]})
+append_body = check_sheets_response(append_resp, "appending row")
 
-updated_range = body.get("updates", {}).get("updatedRange", "")
-match = re.search(r"![A-Za-z]+(\d+)", updated_range)
-if not match:
+# Google decides where the row actually lands, so the real row number comes from its response, not a local guess.
+updated_range = append_body.get("updates", {}).get("updatedRange", "")
+row_number_match = re.search(r"![A-Za-z]+(\d+)", updated_range)
+if not row_number_match:
     raise Exception(f"Could not determine the appended row number from Google's response (updatedRange: '{updated_range}').")
 
-outputs.row_number = int(match.group(1))
+outputs.row_number = int(row_number_match.group(1))
 outputs.spreadsheet_id = spreadsheet_id
