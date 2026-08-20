@@ -62,6 +62,11 @@ def check_sheets_response(resp, context):
     return body
 
 
+def row_from_cells(data_row, headers):
+    # Sheets omits trailing empty cells from a row entirely, so a row can be shorter than headers — pad missing cells with "".
+    return {header: (data_row[i] if i < len(data_row) else "") for i, header in enumerate(headers)}
+
+
 spreadsheet_id = inputs.spreadsheet_id
 sheet_name = inputs.sheet_name
 
@@ -118,8 +123,8 @@ else:
     # match_column/match_value targeting needs the whole sheet to find (and disambiguate) the row.
     range_param = quote(quoted_sheet_name, safe="")
     search_resp = kizen.api.get(f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values/{range_param}")
-    body = check_sheets_response(search_resp, "searching for row to update")
-    values = body.get("values", [])
+    search_body = check_sheets_response(search_resp, "searching for row to update")
+    values = search_body.get("values", [])
 
     if not values or header_row > len(values):
         raise Exception(f"header_row {header_row} exceeds sheet '{sheet_name}' row count ({len(values)}).")
@@ -135,7 +140,7 @@ else:
     matches = []
     for offset, data_row in enumerate(values[header_row:]):
         sliced_row = data_row[header_column - 1:]
-        row = {header: (sliced_row[i] if i < len(sliced_row) else "") for i, header in enumerate(headers)}
+        row = row_from_cells(sliced_row, headers)
         if row.get(match_column) == match_value:
             matches.append(header_row + offset + 1)
 
@@ -152,6 +157,7 @@ if unknown_keys:
 
 batch_data = []
 for header, value in row_data.items():
+    # headers[0] sits at column header_column itself, so its 0-indexed position needs no further offset.
     column_number = header_column + headers.index(header)
     column_letter = column_number_to_letter(column_number)
     batch_data.append({
@@ -159,11 +165,11 @@ for header, value in row_data.items():
         "values": [[str(value)]],
     })
 
-resp = kizen.api.post(
+batch_resp = kizen.api.post(
     f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values:batchUpdate",
     json={"valueInputOption": "USER_ENTERED", "data": batch_data},
 )
-check_sheets_response(resp, "updating row")
+check_sheets_response(batch_resp, "updating row")
 
 outputs.row_number = row_number
 outputs.success = True
