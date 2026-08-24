@@ -1,7 +1,8 @@
 import json
 from urllib.parse import quote
 
-BASE_URL = "/external-integrations/proxy/google_sheets/shared"
+# Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
+BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_explore_feasibility_of_google_sheets_integration/shared"
 
 
 def raise_sheets_error(payload, context, fallback_status):
