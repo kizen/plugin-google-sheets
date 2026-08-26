@@ -5,6 +5,9 @@ from urllib.parse import quote
 # Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
 BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_explore_feasibility_of_google_sheets_integration/shared"
 
+# Kizen's longtext field type tops out around 50k characters — a single output over this would fail downstream anyway.
+MAX_OUTPUT_CHARS = 50000
+
 
 def raise_sheets_error(payload, context, fallback_status):
     # Proxy wraps upstream calls as {status_code, body}; a Google error lives at body["error"], a proxy error is flat, and body may not be a dict at all (e.g. HTML on a wrong host) — hence the isinstance guard.
@@ -114,5 +117,9 @@ else:
         if not return_all_matches:
             break
 
-    outputs.matching_rows = json.dumps(matching_rows)
+    matching_rows_json = json.dumps(matching_rows)
+    if len(matching_rows_json) > MAX_OUTPUT_CHARS:
+        raise Exception(f"matching_rows output would be {len(matching_rows_json)} characters, over the {MAX_OUTPUT_CHARS}-character output limit. Narrow the result with a more specific match_value, or set return_all_matches to false.")
+
+    outputs.matching_rows = matching_rows_json
     outputs.row_numbers = json.dumps(row_numbers)
