@@ -54,7 +54,7 @@
     {
       "name": "row_number",
       "label": "Row Number",
-      "hint": "Real 1-indexed sheet row to update, typically from a prior Search Rows. Provide this OR match_column + match_value, not both. A string here (not number) deliberately — see CLAUDE.md's optional-number-input gotcha.",
+      "hint": "Real 1-indexed sheet row to update, typically from a prior Search Rows. Provide this OR match_column + match_value, not both. A string here (not number) deliberately — see README.md's Known Limitations section.",
       "data_type": "string",
       "required": false,
       "input_source": "variable",
