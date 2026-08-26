@@ -157,11 +157,14 @@ else:
         row = row_from_cells(sliced_row, headers)
         if row.get(match_column) == match_value:
             matches.append(header_row + offset + 1)
+            if len(matches) > 1:
+                # Already ambiguous — no need to keep scanning the rest of the sheet just to enumerate every match.
+                break
 
     if not matches:
         raise Exception(f"No row found where '{match_column}' = '{match_value}' in sheet '{sheet_name}'.")
     if len(matches) > 1:
-        raise Exception(f"{len(matches)} rows match '{match_column}' = '{match_value}' (rows {matches}) — ambiguous update target. Use row_number instead to target one exactly.")
+        raise Exception(f"At least {len(matches)} rows match '{match_column}' = '{match_value}' (including rows {matches}) — ambiguous update target. Use row_number instead to target one exactly.")
 
     row_number = matches[0]
 
