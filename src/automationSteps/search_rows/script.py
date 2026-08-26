@@ -1,4 +1,5 @@
 import json
+import re
 from urllib.parse import quote
 
 # Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
@@ -28,6 +29,13 @@ def a1_quote_sheet_name(name):
     return "'" + name.replace("'", "''") + "'"
 
 
+def validate_spreadsheet_id(spreadsheet_id):
+    # Interpolated directly into the request URL — reject anything that could inject query params or extra path segments.
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", spreadsheet_id):
+        raise Exception(f"spreadsheet_id must contain only letters, numbers, hyphens, and underscores, got: {spreadsheet_id}")
+    return spreadsheet_id
+
+
 def resolve_positive_int(raw, name):
     # header_row/header_column are string inputs (a number-typed optional input crashes the whole run when blank) — blank defaults to 1.
     if not raw:
@@ -48,6 +56,9 @@ def check_sheets_response(resp, context):
     except Exception:
         raise Exception(f"Google Sheets error {context}: unknown_error — HTTP {resp.status_code}")
 
+    if not isinstance(payload, dict):
+        raise Exception(f"Google Sheets error {context}: unknown_error — unexpected response shape, HTTP {resp.status_code}: {str(payload)[:200]}")
+
     body = payload.get("body")
     if not resp.ok or payload.get("status_code", 200) >= 400 or not isinstance(body, dict):
         raise_sheets_error(payload, context, resp.status_code)
@@ -60,7 +71,7 @@ def row_from_cells(data_row, headers):
     return {header: (data_row[i] if i < len(data_row) else "") for i, header in enumerate(headers)}
 
 
-spreadsheet_id = inputs.spreadsheet_id
+spreadsheet_id = validate_spreadsheet_id(inputs.spreadsheet_id)
 sheet_name = inputs.sheet_name
 column_name = inputs.column_name
 match_value = inputs.match_value

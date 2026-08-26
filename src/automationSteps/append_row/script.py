@@ -29,6 +29,13 @@ def a1_quote_sheet_name(name):
     return "'" + name.replace("'", "''") + "'"
 
 
+def validate_spreadsheet_id(spreadsheet_id):
+    # Interpolated directly into the request URL — reject anything that could inject query params or extra path segments.
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", spreadsheet_id):
+        raise Exception(f"spreadsheet_id must contain only letters, numbers, hyphens, and underscores, got: {spreadsheet_id}")
+    return spreadsheet_id
+
+
 def column_number_to_letter(n):
     letters = ""
     while n > 0:
@@ -57,6 +64,9 @@ def check_sheets_response(resp, context):
     except Exception:
         raise Exception(f"Google Sheets error {context}: unknown_error — HTTP {resp.status_code}")
 
+    if not isinstance(payload, dict):
+        raise Exception(f"Google Sheets error {context}: unknown_error — unexpected response shape, HTTP {resp.status_code}: {str(payload)[:200]}")
+
     body = payload.get("body")
     if not resp.ok or payload.get("status_code", 200) >= 400 or not isinstance(body, dict):
         raise_sheets_error(payload, context, resp.status_code)
@@ -64,7 +74,7 @@ def check_sheets_response(resp, context):
     return body
 
 
-spreadsheet_id = inputs.spreadsheet_id
+spreadsheet_id = validate_spreadsheet_id(inputs.spreadsheet_id)
 sheet_name = inputs.sheet_name
 
 header_row = resolve_positive_int(getattr(inputs, "header_row", None), "header_row")
@@ -99,7 +109,8 @@ unknown_keys = [key for key in row_data if key not in headers]
 if unknown_keys:
     raise Exception(f"row_data has key(s) not found in sheet '{sheet_name}' headers: {unknown_keys}. Headers: {headers}")
 
-ordered_values = [str(row_data.get(header, "")) for header in headers]
+# A JSON null value is also treated as blank, same as a missing header — str(None) would otherwise write the literal text "None".
+ordered_values = [("" if (value := row_data.get(header)) is None else str(value)) for header in headers]
 
 start_column_letter = column_number_to_letter(header_column)
 # Anchor at the header row itself — values.append finds the first empty row below it within this column range on its own.

@@ -1,4 +1,5 @@
 import json
+import re
 from urllib.parse import quote
 
 # Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
@@ -26,6 +27,13 @@ def raise_sheets_error(payload, context, fallback_status):
 def a1_quote_sheet_name(name):
     # Quote unconditionally — always valid in A1 notation, so no need to guess when it's required.
     return "'" + name.replace("'", "''") + "'"
+
+
+def validate_spreadsheet_id(spreadsheet_id):
+    # Interpolated directly into the request URL — reject anything that could inject query params or extra path segments.
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", spreadsheet_id):
+        raise Exception(f"spreadsheet_id must contain only letters, numbers, hyphens, and underscores, got: {spreadsheet_id}")
+    return spreadsheet_id
 
 
 def column_number_to_letter(n):
@@ -56,6 +64,9 @@ def check_sheets_response(resp, context):
     except Exception:
         raise Exception(f"Google Sheets error {context}: unknown_error — HTTP {resp.status_code}")
 
+    if not isinstance(payload, dict):
+        raise Exception(f"Google Sheets error {context}: unknown_error — unexpected response shape, HTTP {resp.status_code}: {str(payload)[:200]}")
+
     body = payload.get("body")
     if not resp.ok or payload.get("status_code", 200) >= 400 or not isinstance(body, dict):
         raise_sheets_error(payload, context, resp.status_code)
@@ -68,7 +79,7 @@ def row_from_cells(data_row, headers):
     return {header: (data_row[i] if i < len(data_row) else "") for i, header in enumerate(headers)}
 
 
-spreadsheet_id = inputs.spreadsheet_id
+spreadsheet_id = validate_spreadsheet_id(inputs.spreadsheet_id)
 sheet_name = inputs.sheet_name
 
 header_row = resolve_positive_int(getattr(inputs, "header_row", None), "header_row")
@@ -95,6 +106,8 @@ except Exception as e:
 
 if not isinstance(row_data, dict):
     raise Exception(f"row_data must be a JSON object (e.g. {{\"Status\": \"Inactive\"}}), got: {inputs.row_data}")
+if not row_data:
+    raise Exception("row_data must include at least one column to update.")
 
 quoted_sheet_name = a1_quote_sheet_name(sheet_name)
 
@@ -156,14 +169,15 @@ unknown_keys = [key for key in row_data if key not in headers]
 if unknown_keys:
     raise Exception(f"row_data has key(s) not found in sheet '{sheet_name}' headers: {unknown_keys}. Headers: {headers}")
 
+# headers[0] sits at column header_column itself, so no further offset is needed beyond each header's list index.
+column_by_header = {header: header_column + i for i, header in enumerate(headers)}
+
 batch_data = []
 for header, value in row_data.items():
-    # headers[0] sits at column header_column itself, so its 0-indexed position needs no further offset.
-    column_number = header_column + headers.index(header)
-    column_letter = column_number_to_letter(column_number)
+    column_letter = column_number_to_letter(column_by_header[header])
     batch_data.append({
         "range": f"{quoted_sheet_name}!{column_letter}{row_number}",
-        "values": [[str(value)]],
+        "values": [["" if value is None else str(value)]],
     })
 
 batch_resp = kizen.api.post(
