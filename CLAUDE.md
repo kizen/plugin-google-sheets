@@ -25,6 +25,8 @@ A fifth action, Create Spreadsheet/Tab, was built and verified (bare create, `fo
 - **Why business-level:** every action runs as a Kizen Code Step, which executes as a fixed service account and cannot complete an interactive OAuth consent flow. A `user`-level service returns a 503 (`"User must authorize this service"`) regardless of authorization attempts.
 - Trade-off: all actions act as one shared identity. Access to a given spreadsheet depends on that shared account having access to it.
 
+**Caller-identity restriction — `scope: "service-account-only"`.** Not to be confused with the Google OAuth `scopes` string below — this is a separate `kizen.json` service-level field, enforced by Kizen's proxy on every request. Without it, the `shared` service's credentials could be called from any interactive JS surface (e.g. the frontend), not just this plugin's own packaged Code Steps. `service-account-only` locks it down so only this plugin's own automation steps can call it; a generic code step or any browser-side caller gets a 403. (Documented at `kizen.github.io/app-engine/06-auth-secrets-services.html#field-scope-caller-identity-restriction` — not part of the public plugin-developer docs, and no other plugin in the workspace uses it yet.)
+
 **Scopes:**
 
 | Scope | Classification | Purpose |
