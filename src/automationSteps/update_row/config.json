@@ -1,7 +1,7 @@
 {
   "name": "Update Row/Cell",
   "plugin_description": "Integrates with Google Sheets to read, search, and write rows from Kizen agentic workflows.",
-  "action_description": "Updates specific cells within one row, keyed by header name. Targets the row either by row_number (e.g. from a prior Search Rows) or by match_column/match_value. Only the columns present in row_data are changed — everything else in the row is left untouched.",
+  "action_description": "Updates specific cells within one row, keyed by header name. Targets the row either by row_number (e.g. from a prior Search Rows) or by match_column/match_value. Only the columns present in row_data are changed — everything else in the row is left untouched. If match_column/match_value matches more than one row, set update_all to update every matching row instead of raising an error.",
   "runtime": "python-3-13",
   "action_type": "google_sheets_update_row",
   "script": "script.py",
@@ -72,20 +72,30 @@
     {
       "name": "match_value",
       "label": "Match Value",
-      "hint": "Required if match_column is set. If more than one row matches exactly, this action raises an error rather than guessing which one to update.",
+      "hint": "Required if match_column is set. If more than one row matches exactly, every matching row is updated unless update_all is explicitly set to false.",
       "data_type": "string",
       "required": false,
       "input_source": "variable",
       "script_alias": "match_value"
+    },
+    {
+      "name": "update_all",
+      "label": "Update All Matches",
+      "hint": "Only applies to match_column/match_value targeting. If true (the default), every row matching match_column/match_value is updated. If false, requires an exact single match, raising an ambiguous-match error otherwise. Has no effect when targeting by row_number.",
+      "data_type": "boolean",
+      "required": true,
+      "input_source": "variable",
+      "script_alias": "update_all",
+      "default": true
     }
   ],
   "outputs": [
     {
-      "name": "row_number",
-      "label": "Row Number",
-      "hint": "The real 1-indexed sheet row that was updated.",
-      "data_type": "number",
-      "script_alias": "row_number",
+      "name": "rows_updated",
+      "label": "Rows Updated",
+      "hint": "The real 1-indexed sheet row(s) that were updated. If update_all is false, this is a single number (e.g. 5). If update_all is true, this is a JSON array string of every updated row (e.g. [5, 6, 7]), even if only one row matched.",
+      "data_type": "string",
+      "script_alias": "rows_updated",
       "conflict_resolution": "overwrite",
       "create_field_options": false
     },

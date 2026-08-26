@@ -88,6 +88,7 @@ header_column = resolve_positive_int(getattr(inputs, "header_column", None), "he
 row_number_raw = getattr(inputs, "row_number", None)
 match_column = getattr(inputs, "match_column", None)
 match_value = getattr(inputs, "match_value", None)
+update_all = inputs.update_all
 
 has_row_number = bool(row_number_raw)
 has_match = bool(match_column) or bool(match_value)
@@ -133,6 +134,7 @@ if has_row_number:
         raise Exception(f"header_column {header_column} exceeds header row's column count ({len(header_row_values)}) in sheet '{sheet_name}'.")
 
     headers = header_row_values[header_column - 1:]
+    row_numbers = [row_number]
 else:
     # match_column/match_value targeting needs the whole sheet to find (and disambiguate) the row.
     range_param = quote(quoted_sheet_name, safe="")
@@ -157,16 +159,16 @@ else:
         row = row_from_cells(sliced_row, headers)
         if row.get(match_column) == match_value:
             matches.append(header_row + offset + 1)
-            if len(matches) > 1:
-                # Already ambiguous — no need to keep scanning the rest of the sheet just to enumerate every match.
+            if not update_all and len(matches) > 1:
+                # Already ambiguous and update_all isn't set — no need to keep scanning the rest of the sheet.
                 break
 
     if not matches:
         raise Exception(f"No row found where '{match_column}' = '{match_value}' in sheet '{sheet_name}'.")
-    if len(matches) > 1:
-        raise Exception(f"At least {len(matches)} rows match '{match_column}' = '{match_value}' (including rows {matches}) — ambiguous update target. Use row_number instead to target one exactly.")
+    if len(matches) > 1 and not update_all:
+        raise Exception(f"At least {len(matches)} rows match '{match_column}' = '{match_value}' (including rows {matches}) — ambiguous update target with update_all set to false. Use row_number instead to target one exactly, or remove update_all (or set it to true) to update every matching row.")
 
-    row_number = matches[0]
+    row_numbers = matches
 
 unknown_keys = [key for key in row_data if key not in headers]
 if unknown_keys:
@@ -176,12 +178,13 @@ if unknown_keys:
 column_by_header = {header: header_column + i for i, header in enumerate(headers)}
 
 batch_data = []
-for header, value in row_data.items():
-    column_letter = column_number_to_letter(column_by_header[header])
-    batch_data.append({
-        "range": f"{quoted_sheet_name}!{column_letter}{row_number}",
-        "values": [["" if value is None else str(value)]],
-    })
+for target_row in row_numbers:
+    for header, value in row_data.items():
+        column_letter = column_number_to_letter(column_by_header[header])
+        batch_data.append({
+            "range": f"{quoted_sheet_name}!{column_letter}{target_row}",
+            "values": [["" if value is None else str(value)]],
+        })
 
 batch_resp = kizen.api.post(
     f"{BASE_URL}/v4/spreadsheets/{spreadsheet_id}/values:batchUpdate",
@@ -189,5 +192,6 @@ batch_resp = kizen.api.post(
 )
 check_sheets_response(batch_resp, "updating row")
 
-outputs.row_number = row_number
+# update_all off means row_numbers is always a single-element list — output it as a bare number, not a JSON array.
+outputs.rows_updated = json.dumps(row_numbers) if update_all else str(row_numbers[0])
 outputs.success = True
