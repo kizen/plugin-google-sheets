@@ -27,7 +27,7 @@ This is a requirement, not a design choice: every action runs as a Kizen Code St
 
 **Trade-off:** all actions act under one shared identity. Access to a given spreadsheet depends on that shared account already having been granted access to it.
 
-**Caller-identity restriction.** The `shared` service in `kizen.json` sets `"scope": "service-account-only"` — a Kizen platform field, distinct from the Google OAuth scopes below, enforced by Kizen's proxy on every request. It restricts the service so only this plugin's own packaged Code Steps can call it; a generic code step or any frontend/browser caller gets a 403.
+**Caller-identity restriction — temporarily removed for testing.** The `shared` service can set `"scope": "service-account-only"` — a Kizen platform field, distinct from the Google OAuth scopes below, enforced by Kizen's proxy on every request. It restricts the service so only this plugin's own packaged Code Steps can call it; a generic code step or any frontend/browser caller gets a 403. Setting it also blocked the Kizen dev toolkit's own "Remote runner" test execution with the same 403, so it's currently unset in `kizen.json` while the rest of this PR's testing is in progress. **Must be re-added (`"scope": "service-account-only"` on the `shared` service) before merging** — and the dev-toolkit interaction should be understood first, since it may mean this field can't be set until testing is complete, or that the dev toolkit needs a different execution path to test a service with this restriction.
 
 ### Scopes
 
