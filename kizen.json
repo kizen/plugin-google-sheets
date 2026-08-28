@@ -20,6 +20,7 @@
       "display_name": "Google Sheets",
       "auth_type": "oauth",
       "auth_level": "business",
+      "scope": "service-account-only",
       "required_entitlement": null,
       "base_service_url": "https://sheets.googleapis.com",
       "auth_credentials": {
