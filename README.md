@@ -13,7 +13,7 @@ Every action is a plain data-fetch/write primitive addressed by column header na
 | Action | Description |
 | --- | --- |
 | **Get Rows / Read Range** | Fetch rows from a sheet, keyed by header name, with optional single-column filtering. |
-| **Search Rows** | Find row(s) by exact column value; returns the matches and their real sheet row numbers. |
+| **Search Rows** | Find row(s) by column value, using equals/not-equals/contains/starts-with/is-empty/is-not-empty matching; returns the matches and their real sheet row numbers. |
 | **Append Row** | Add a new row to a sheet, keyed by header name via a single JSON object. |
 | **Update Row/Cell** | Update specific cells within one row, targeted by row number or column match, without touching the rest of the row. |
 
@@ -63,7 +63,8 @@ Fetches the whole sheet, treats `header_row`/`header_column` as the top-left of 
 | --- | --- | --- |
 | `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | Same as Get Rows. |
 | `column_name` | Yes | Header name to search. |
-| `match_value` | Yes | Exact match only. |
+| `match_type` | No | How to compare: `equals` (default), `not_equals`, `contains`, `starts_with`, `is_empty`, or `is_not_empty`. Leave blank for `equals`. |
+| `match_value` | Conditional | Value to compare against, per `match_type`. Required unless `match_type` is `is_empty` or `is_not_empty`. |
 | `return_all_matches` | Yes | `true` (default): every matching row. `false`: stops at the first match. |
 
 **Outputs:** `matching_rows` (JSON array string), `row_numbers` (JSON array of the matches' real 1-indexed sheet row numbers — feeds directly into Update Row/Cell's `row_number` input).

@@ -8,6 +8,9 @@ BASE_URL = "/external-integrations/proxy/google_sheets_preview_kzn_18007_spike_e
 # Kizen's longtext field type tops out around 50k characters — a single output over this would fail downstream anyway.
 MAX_OUTPUT_CHARS = 50000
 
+MATCH_TYPES = {"equals", "not_equals", "contains", "starts_with", "is_empty", "is_not_empty"}
+MATCH_TYPES_REQUIRING_VALUE = MATCH_TYPES - {"is_empty", "is_not_empty"}
+
 
 def raise_sheets_error(payload, context, fallback_status):
     # Proxy wraps upstream calls as {status_code, body}; a Google error lives at body["error"], a proxy error is flat, and body may not be a dict at all (e.g. HTML on a wrong host) — hence the isinstance guard.
@@ -74,14 +77,35 @@ def row_from_cells(data_row, headers):
     return {header: (data_row[i] if i < len(data_row) else "") for i, header in enumerate(headers)}
 
 
+def value_matches(cell_value, match_type, match_value):
+    if match_type == "equals":
+        return cell_value == match_value
+    if match_type == "not_equals":
+        return cell_value != match_value
+    if match_type == "contains":
+        return match_value in cell_value
+    if match_type == "starts_with":
+        return cell_value.startswith(match_value)
+    if match_type == "is_empty":
+        return cell_value == ""
+    return cell_value != ""  # is_not_empty
+
+
 spreadsheet_id = validate_spreadsheet_id(inputs.spreadsheet_id)
 sheet_name = inputs.sheet_name
 column_name = inputs.column_name
-match_value = inputs.match_value
+match_value = getattr(inputs, "match_value", None)
 return_all_matches = inputs.return_all_matches
 
 header_row = resolve_positive_int(getattr(inputs, "header_row", None), "header_row")
 header_column = resolve_positive_int(getattr(inputs, "header_column", None), "header_column")
+
+match_type_raw = getattr(inputs, "match_type", None)
+match_type = match_type_raw if match_type_raw else "equals"
+if match_type not in MATCH_TYPES:
+    raise Exception(f"match_type must be one of {sorted(MATCH_TYPES)}, got '{match_type}'.")
+if match_type in MATCH_TYPES_REQUIRING_VALUE and not match_value:
+    raise Exception(f"match_value is required when match_type is '{match_type}'.")
 
 range_param = quote(a1_quote_sheet_name(sheet_name), safe="")
 
@@ -108,7 +132,7 @@ else:
     for offset, data_row in enumerate(values[header_row:]):
         sliced_row = data_row[header_column - 1:]
         row = row_from_cells(sliced_row, headers)
-        if row.get(column_name) != match_value:
+        if not value_matches(row.get(column_name, ""), match_type, match_value):
             continue
 
         matching_rows.append(row)
