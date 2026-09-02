@@ -40,8 +40,7 @@
       "data_type": "number",
       "required": false,
       "input_source": "variable",
-      "script_alias": "header_row",
-      "default": 1
+      "script_alias": "header_row"
     },
     {
       "name": "header_column",
@@ -50,13 +49,12 @@
       "data_type": "number",
       "required": false,
       "input_source": "variable",
-      "script_alias": "header_column",
-      "default": 1
+      "script_alias": "header_column"
     },
     {
       "name": "row_number",
       "label": "Row Number",
-      "hint": "Real 1-indexed sheet row to update, typically from a prior Search Rows. Provide this OR match_column + match_value, not both. A string here (not number) deliberately — see README.md's Known Limitations section.",
+      "hint": "Real 1-indexed sheet row to update, typically from a prior Search Rows. Provide this OR match_column + match_value, not both. A string, not a number, since there's no sensible default value for \"which row\" to fall back to when left blank.",
       "data_type": "string",
       "required": false,
       "input_source": "variable",
@@ -83,12 +81,11 @@
     {
       "name": "update_all",
       "label": "Update All Matches",
-      "hint": "Only applies to match_column/match_value targeting. If true (the default), every row matching match_column/match_value is updated. If false, requires an exact single match, raising an ambiguous-match error otherwise. Has no effect when targeting by row_number.",
+      "hint": "Only applies to match_column/match_value targeting. If true, every row matching match_column/match_value is updated. If false, requires an exact single match, raising an ambiguous-match error otherwise. Has no effect when targeting by row_number. Must be set explicitly — there is no functional default.",
       "data_type": "boolean",
       "required": true,
       "input_source": "variable",
-      "script_alias": "update_all",
-      "default": true
+      "script_alias": "update_all"
     }
   ],
   "outputs": [

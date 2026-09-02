@@ -40,8 +40,7 @@
       "data_type": "number",
       "required": false,
       "input_source": "variable",
-      "script_alias": "header_row",
-      "default": 1
+      "script_alias": "header_row"
     },
     {
       "name": "header_column",
@@ -50,8 +49,7 @@
       "data_type": "number",
       "required": false,
       "input_source": "variable",
-      "script_alias": "header_column",
-      "default": 1
+      "script_alias": "header_column"
     }
   ],
   "outputs": [

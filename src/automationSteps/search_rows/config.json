@@ -58,8 +58,7 @@
       "data_type": "boolean",
       "required": true,
       "input_source": "variable",
-      "script_alias": "return_all_matches",
-      "default": true
+      "script_alias": "return_all_matches"
     },
     {
       "name": "header_row",
@@ -68,8 +67,7 @@
       "data_type": "number",
       "required": false,
       "input_source": "variable",
-      "script_alias": "header_row",
-      "default": 1
+      "script_alias": "header_row"
     },
     {
       "name": "header_column",
@@ -78,8 +76,7 @@
       "data_type": "number",
       "required": false,
       "input_source": "variable",
-      "script_alias": "header_column",
-      "default": 1
+      "script_alias": "header_column"
     }
   ],
   "outputs": [
