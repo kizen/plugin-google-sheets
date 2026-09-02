@@ -45,8 +45,7 @@ def column_number_to_letter(n):
 
 
 def resolve_positive_int(raw, name):
-    # header_row/header_column: data_type "number", required: false — diagnostic test for whether the platform's
-    # known "optional numeric input crashes when blank" issue (confirmed via the CLI dev toolkit) also occurs in the app.
+    # Optional number with a platform default of 1 — this guard covers a bound variable resolving to blank or non-whole at runtime.
     if raw is None or raw == "":
         return 1
     if isinstance(raw, float) and not raw.is_integer():
