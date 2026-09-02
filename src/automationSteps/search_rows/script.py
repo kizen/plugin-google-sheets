@@ -43,9 +43,12 @@ def validate_spreadsheet_id(spreadsheet_id):
 
 
 def resolve_positive_int(raw, name):
-    # header_row/header_column are string inputs (a number-typed optional input crashes the whole run when blank) — blank defaults to 1.
-    if not raw:
+    # header_row/header_column: data_type "number", required: false — diagnostic test for whether the platform's
+    # known "optional numeric input crashes when blank" issue (confirmed via the CLI dev toolkit) also occurs in the app.
+    if raw is None or raw == "":
         return 1
+    if isinstance(raw, float) and not raw.is_integer():
+        raise Exception(f"{name} must be a whole number, got {raw}.")
     try:
         value = int(raw)
     except (TypeError, ValueError):
