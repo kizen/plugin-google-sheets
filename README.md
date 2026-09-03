@@ -17,8 +17,6 @@ Every action is a plain data-fetch/write primitive addressed by column header na
 | **Append Row** | Add a new row to a sheet, keyed by header name via a single JSON object. |
 | **Update Row/Cell** | Update specific cells within one row, targeted by row number or column match, without touching the rest of the row. |
 
-An earlier fifth action, Create Spreadsheet/Tab (bare create, folder placement, template copying), was built and verified but removed from the released action set along with its Google Drive scope dependency — see version control history if it's revisited.
-
 ## Authentication
 
 This plugin uses a single **business-level** Google OAuth connection — one shared Google account connects on behalf of the whole business, rather than each user connecting individually.
@@ -31,14 +29,10 @@ The `shared` service in `kizen.json` sets `"scope": "service-account-only"`, whi
 
 ### Scopes
 
-| Scope | Classification | Purpose |
-| --- | --- | --- |
-| `spreadsheets` | Sensitive, not Restricted | Read/write access for all four actions. |
-| `userinfo.email`, `userinfo.profile` | — | Displays the connected account in the setup assistant. |
-
-`spreadsheets` is Sensitive but not Restricted, so it does not require an annual CASA (Cloud Application Security Assessment) before production use.
-
-Any scope change requires reconnecting the OAuth connection — an existing token doesn't retroactively gain a new scope — and adding the scope to the GCP OAuth consent screen's own scope list; declaring it in `kizen.json` alone is not sufficient.
+| Scope  | Purpose |
+| --- | --- |
+| `spreadsheets` | Read/write access for all four actions. |
+| `userinfo.email`, `userinfo.profile` |  Displays the connected account in the setup assistant. |
 
 ## Action Reference
 
@@ -113,22 +107,4 @@ A partial update, not a full-row overwrite — only the columns named in `row_da
 ## Development
 
 - Runtime: Python 3.13, executed as Kizen Agentic Workflow Code Steps.
-- HTTP calls to Google go through Kizen's runtime-injected `kizen.api` client (`get`/`post`/`patch`/`put`/`delete`), which proxies requests via `/external-integrations/proxy/{plugin_api_name}/{service_name}/{api_path}`.
-- Kizen's proxy wraps every upstream response in an envelope (`{"status_code", "response_headers", "body"}`) — scripts read through the `body` key, not the top-level response.
-- The Sheets API requires `base_service_url: https://sheets.googleapis.com`, not the generic `www.googleapis.com/sheets/v4/...` path Drive uses for its own API — that combination returns Google's generic branded 404 page, not a Sheets API error.
 - Local development and testing use the Kizen App Development Toolkit.
-
-```text
-plugin-google-sheets/
-├── kizen.json
-├── README.md
-├── releaseNotes/
-│   └── 1.0.0.md
-└── src/
-    └── automationSteps/
-        ├── get_rows/
-        ├── search_rows/
-        ├── append_row/
-        └── update_row/
-            (each: config.json + script.py)
-```
