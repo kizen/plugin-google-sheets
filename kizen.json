@@ -1,0 +1,47 @@
+{
+  "name": "Google Sheets",
+  "api_name": "google_sheets",
+  "version": "0.0.1",
+  "description": "Read, search, and write rows in Google Sheets from Kizen agentic workflows.",
+  "published": true,
+  "release_branches": ["main"],
+  "release_environments": ["dev"],
+  "engine": "1.0.0",
+  "entry": "src/",
+  "release_notes_directory": "releaseNotes/",
+  "config_template": {},
+  "base_config": {},
+  "developer_business_id": {
+    "staging": "0fbf2bd5-f7c4-4bb1-a354-6d3d79120a41"
+  },
+  "services": [
+    {
+      "service_name": "shared",
+      "display_name": "Google Sheets",
+      "auth_type": "oauth",
+      "auth_level": "business",
+      "scope": "service-account-only",
+      "required_entitlement": null,
+      "base_service_url": "https://sheets.googleapis.com",
+      "auth_credentials": {
+        "client_id": "790017211527-b6bsd2886dnq66srjpliugi6ere7nl49.apps.googleusercontent.com",
+        "client_secret": {
+          "encrypted": true,
+          "value": "eyJ2IjoxLCJhbGciOiJSU0EtT0FFUC0yNTYrQTI1NkdDTSIsImsiOiJpUGJIYkNDdEFhZzl1RjYvZGVsUmVTRGg0M28rUTR6UDhaVUh2L2Z1TVFXbmJZOXVYZDdZSlo3QWlhbC8vZ09BcHNGU1dwSGFSRzhKVWlQaFphVEFHRUxZOTNVTTA3d29FUGdiUnVaay90c3ovQW9UTm5qTkx0OVh5MUxlcFZmV2l3YUtuME1RbEg2ek9zRU52ZXdJVUdjODRRZTVwb0h6eWxZTFcraFhsV0I3aE15Nld3dWFqcmovdHk1UEpibWNhTEw5Ylc4Z0lOMUxYL1hTbHUzUEo3MnhIYnRWT1p4ODU4RE5NUnhVbXF3VGx4MldhZVZxLzJubkN6dElseGFncHA5RHl1Z0lNd2FTSlYyYXp5N2trMnA3V1RQVzlnQVRkTVJzNWlEQWI5Q21uc29tK1h6aTVBdXF1eVZYU0dCNDN6TXYzRmh5ODJrUkNEaGVFZW0wOG0xSE9LV3dHZCtCUURxcEhmVFdwZExDTEFqa2NBbGROYStBL2VERTBhQ0V4UWdyMEpBaEVNb1d1UllxYXRlZEZRWDdFK3g2bi9yM0Z1bFRSUmJ6UzQ2NFZmNkVqc2drL1FVWTZ6aVVLV2xHeDdvWWFEWXZZZ3BBcy95WWQreXczK3UvazBoUDJXNUd2dldlaDhuV1oyKzFidExOSFhxakdJbXptNFVLSHZZdiIsIml2IjoidzVYUzFFaHZLZDV2b05BNSIsInRhZyI6ImtPT0Nmc3VOck50TFhjZDhocWJIU3c9PSIsImN0IjoidUpmN2psTzBGK2EzUHlTSStZYktwWXFOakdJbGJkMW5RSjJjcGZCbEpGWk9uM3M9In0="
+        },
+        "scopes": "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+        "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "content_type": "application/x-www-form-urlencoded",
+        "token_field_name": "access_token",
+        "default_token_expiry": 3600,
+        "authorize_params": {
+          "access_type": "offline",
+          "prompt": "consent"
+        },
+        "success_redirect_path": "/oauth/success",
+        "error_redirect_path": "/oauth/error"
+      }
+    }
+  ]
+}
