@@ -25,8 +25,6 @@ This is a requirement, not a design choice: every action runs as a Kizen Code St
 
 **Trade-off:** all actions act under one shared identity. Access to a given spreadsheet depends on that shared account already having been granted access to it.
 
-The `shared` service in `kizen.json` sets `"scope": "service-account-only"`, which restricts the service so only this plugin's own packaged Code Steps can call it.
-
 ### Scopes
 
 | Scope  | Purpose |
