@@ -54,8 +54,8 @@
     {
       "name": "row_number",
       "label": "Row Number",
-      "hint": "Real 1-indexed sheet row to update, typically from a prior Search Rows. Provide this OR match_column + match_value, not both. A string, not a number, since there's no sensible default value for \"which row\" to fall back to when left blank.",
-      "data_type": "string",
+      "hint": "Real 1-indexed sheet row to update, typically from a prior Search Rows. Provide this OR match_column + match_value, not both. Leave blank to target by match_column/match_value instead.",
+      "data_type": "number",
       "required": false,
       "input_source": "variable",
       "script_alias": "row_number"

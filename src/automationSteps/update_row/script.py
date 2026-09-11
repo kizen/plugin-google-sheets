@@ -114,6 +114,8 @@ if not row_data:
 quoted_sheet_name = a1_quote_sheet_name(sheet_name)
 
 if has_row_number:
+    if isinstance(row_number_raw, float) and not row_number_raw.is_integer():
+        raise Exception(f"row_number must be a whole number, got {row_number_raw}.")
     try:
         row_number = int(row_number_raw)
     except (TypeError, ValueError):
