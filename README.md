@@ -25,8 +25,6 @@ This is a requirement, not a design choice: every action runs as a Kizen Code St
 
 **Trade-off:** all actions act under one shared identity. Access to a given spreadsheet depends on that shared account already having been granted access to it.
 
-The `shared` service in `kizen.json` sets `"scope": "service-account-only"`, which restricts the service so only this plugin's own packaged Code Steps can call it.
-
 ### Scopes
 
 | Scope  | Purpose |
@@ -93,16 +91,12 @@ A partial update, not a full-row overwrite — only the columns named in `row_da
 
 ## Known Limitations
 
-- **No change-notification trigger.** The Sheets API has no push/webhook mechanism. A native Kizen Scheduled trigger paired with Get Rows or Search Rows supports a "check periodically" pattern with no new plugin code; diffing against previously seen data is left to the workflow.
-- **Single-row writes only.** Append Row writes one row per call.
-- **No spreadsheet or Drive-level operations.** No spreadsheet/tab creation, no moving, sharing, or permission changes — this plugin is Sheets-data-only.
 - **No pagination.** Get Rows and Search Rows fetch the entire sheet in one call; very large sheets may be slow or approach response size limits.
 - **`row_data` values are interpreted like typed input, not stored literally.** Append Row and Update Row/Cell write with `valueInputOption=USER_ENTERED`, which behaves exactly like typing directly into a cell — this is what lets a date string become a real date, but it has two consequences worth knowing:
   - A numeric-looking string like `"00501"` (e.g. a zip code) becomes the number `501`, losing its leading zeros.
   - A string starting with `=` is executed as a live formula (confirmed: `"=1+1"` evaluates to `2`, not stored as text) — a real risk if `row_data` values can ever come from external or untrusted input flowing through a workflow, not just a display quirk.
 
   Both are avoided the same way: prefix the value with an apostrophe in `row_data`, e.g. `{"Zip": "'00501"}` or `{"Status": "'=1+1"}` — the standard Sheets/Excel convention for forcing plain text. The apostrophe itself isn't stored or displayed. Confirmed to neutralize both cases.
-- **Reserved input/output names exist with no published list.** The shortest, most generic word is the first suspect.
 
 ## Development
 
