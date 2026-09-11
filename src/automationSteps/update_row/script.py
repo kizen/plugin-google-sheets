@@ -2,8 +2,7 @@ import json
 import re
 from urllib.parse import quote
 
-# Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
-BASE_URL = "/external-integrations/proxy/google_sheets_preview_google_sheets_update_data_type/shared"
+BASE_URL = "/external-integrations/proxy/google_sheets/shared"
 
 
 def raise_sheets_error(payload, context, fallback_status):
@@ -115,6 +114,8 @@ if not row_data:
 quoted_sheet_name = a1_quote_sheet_name(sheet_name)
 
 if has_row_number:
+    if isinstance(row_number_raw, float) and not row_number_raw.is_integer():
+        raise Exception(f"row_number must be a whole number, got {row_number_raw}.")
     try:
         row_number = int(row_number_raw)
     except (TypeError, ValueError):
