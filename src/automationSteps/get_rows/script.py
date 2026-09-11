@@ -2,7 +2,8 @@ import json
 import re
 from urllib.parse import quote
 
-BASE_URL = "/external-integrations/proxy/google_sheets/shared"
+# Preview-qualified path for this unmerged PR (see plugin-wizard bot comment) — MUST revert to "/external-integrations/proxy/google_sheets/shared" before merging.
+BASE_URL = "/external-integrations/proxy/google_sheets_preview_google_sheets_update_data_type/shared"
 
 # Kizen's longtext field type tops out around 50k characters — a single output over this would fail downstream anyway.
 MAX_OUTPUT_CHARS = 50000
