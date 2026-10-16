@@ -1,9 +1,7 @@
 {
   "name": "Update Row/Cell",
-  "plugin_description": "Integrates with Google Sheets to read, search, and write rows from Kizen agentic workflows.",
   "action_description": "Updates specific cells within one row, keyed by header name. Targets the row either by row_number (e.g. from a prior Search Rows) or by match_column/match_value. Only the columns present in row_data are changed — everything else in the row is left untouched. If match_column/match_value matches more than one row, set update_all to update every matching row instead of raising an error.",
   "runtime": "python-3-13",
-  "action_type": "google_sheets_update_row",
   "script": "script.py",
   "inputs": [
     {
@@ -12,8 +10,7 @@
       "hint": "The ID from the sheet's URL: .../spreadsheets/d/{spreadsheet_id}/edit",
       "data_type": "string",
       "required": true,
-      "input_source": "variable",
-      "script_alias": "spreadsheet_id"
+      "input_source": "variable"
     },
     {
       "name": "sheet_name",
@@ -21,8 +18,7 @@
       "hint": "The tab name at the bottom of the spreadsheet, e.g. Sheet1.",
       "data_type": "string",
       "required": true,
-      "input_source": "variable",
-      "script_alias": "sheet_name"
+      "input_source": "variable"
     },
     {
       "name": "row_data",
@@ -30,8 +26,7 @@
       "hint": "JSON object string keyed by header name, e.g. {\"Status\": \"Inactive\"}. Only these columns are updated; everything else in the row is left as-is. A key that isn't a real header raises an error.",
       "data_type": "string",
       "required": true,
-      "input_source": "variable",
-      "script_alias": "row_data"
+      "input_source": "variable"
     },
     {
       "name": "header_row",
@@ -39,8 +34,7 @@
       "hint": "Which row contains the column headers (1-indexed). Leave blank to default to 1.",
       "data_type": "number",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "header_row"
+      "input_source": "variable"
     },
     {
       "name": "header_column",
@@ -48,8 +42,7 @@
       "hint": "Which column the headers start in (1-indexed). Columns to the left are ignored. Leave blank to default to 1.",
       "data_type": "number",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "header_column"
+      "input_source": "variable"
     },
     {
       "name": "row_number",
@@ -57,8 +50,7 @@
       "hint": "Real 1-indexed sheet row to update, typically from a prior Search Rows. Provide this OR match_column + match_value, not both. Leave blank to target by match_column/match_value instead.",
       "data_type": "number",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "row_number"
+      "input_source": "variable"
     },
     {
       "name": "match_column",
@@ -66,8 +58,7 @@
       "hint": "Header name to search for the row to update. Provide this (with match_value) OR row_number, not both.",
       "data_type": "string",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "match_column"
+      "input_source": "variable"
     },
     {
       "name": "match_value",
@@ -75,8 +66,7 @@
       "hint": "Required if match_column is set. If more than one row matches exactly, every matching row is updated unless update_all is explicitly set to false.",
       "data_type": "string",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "match_value"
+      "input_source": "variable"
     },
     {
       "name": "update_all",
@@ -84,8 +74,7 @@
       "hint": "Only applies to match_column/match_value targeting. If true, every row matching match_column/match_value is updated. If false, requires an exact single match, raising an ambiguous-match error otherwise. Has no effect when targeting by row_number. Must be set explicitly — there is no functional default.",
       "data_type": "boolean",
       "required": true,
-      "input_source": "variable",
-      "script_alias": "update_all"
+      "input_source": "variable"
     }
   ],
   "outputs": [
@@ -94,7 +83,6 @@
       "label": "Rows Updated",
       "hint": "The real 1-indexed sheet row(s) that were updated. If update_all is false, this is a single number (e.g. 5). If update_all is true, this is a JSON array string of every updated row (e.g. [5, 6, 7]), even if only one row matched.",
       "data_type": "string",
-      "script_alias": "rows_updated",
       "conflict_resolution": "overwrite",
       "create_field_options": false
     },
@@ -102,7 +90,6 @@
       "name": "success",
       "label": "Success",
       "data_type": "boolean",
-      "script_alias": "success",
       "conflict_resolution": "overwrite",
       "create_field_options": false
     }
