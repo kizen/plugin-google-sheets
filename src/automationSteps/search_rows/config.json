@@ -1,9 +1,7 @@
 {
   "name": "Search Rows",
-  "plugin_description": "Integrates with Google Sheets to read, search, and write rows from Kizen agentic workflows.",
   "action_description": "Finds row(s) whose column_name cell matches match_value, per match_type (equals, not_equals, contains, starts_with, is_empty, is_not_empty). Returns the matching rows keyed by header name, plus their real 1-indexed sheet row numbers.",
   "runtime": "python-3-13",
-  "action_type": "google_sheets_search_rows",
   "script": "script.py",
   "inputs": [
     {
@@ -12,8 +10,7 @@
       "hint": "The ID from the sheet's URL: .../spreadsheets/d/{spreadsheet_id}/edit",
       "data_type": "string",
       "required": true,
-      "input_source": "variable",
-      "script_alias": "spreadsheet_id"
+      "input_source": "variable"
     },
     {
       "name": "sheet_name",
@@ -21,8 +18,7 @@
       "hint": "The tab name at the bottom of the spreadsheet, e.g. Sheet1.",
       "data_type": "string",
       "required": true,
-      "input_source": "variable",
-      "script_alias": "sheet_name"
+      "input_source": "variable"
     },
     {
       "name": "column_name",
@@ -30,8 +26,7 @@
       "hint": "Header name of the column to search.",
       "data_type": "string",
       "required": true,
-      "input_source": "variable",
-      "script_alias": "column_name"
+      "input_source": "variable"
     },
     {
       "name": "match_type",
@@ -39,8 +34,7 @@
       "hint": "How to compare each row's column_name cell against match_value: 'equals' (default, exact match), 'not_equals', 'contains', 'starts_with', 'is_empty', or 'is_not_empty'. Leave blank for 'equals'. is_empty/is_not_empty ignore match_value.",
       "data_type": "string",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "match_type"
+      "input_source": "variable"
     },
     {
       "name": "match_value",
@@ -48,8 +42,7 @@
       "hint": "Value to compare against, per match_type. Required unless match_type is is_empty or is_not_empty.",
       "data_type": "string",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "match_value"
+      "input_source": "variable"
     },
     {
       "name": "return_all_matches",
@@ -57,8 +50,7 @@
       "hint": "If true, return every matching row. If false, stop at the first match.",
       "data_type": "boolean",
       "required": true,
-      "input_source": "variable",
-      "script_alias": "return_all_matches"
+      "input_source": "variable"
     },
     {
       "name": "header_row",
@@ -66,8 +58,7 @@
       "hint": "Which row contains the column headers (1-indexed). Leave blank to default to 1.",
       "data_type": "number",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "header_row"
+      "input_source": "variable"
     },
     {
       "name": "header_column",
@@ -75,8 +66,7 @@
       "hint": "Which column the headers start in (1-indexed). Columns to the left are skipped entirely, e.g. a leading row-label column. Leave blank to default to 1.",
       "data_type": "number",
       "required": false,
-      "input_source": "variable",
-      "script_alias": "header_column"
+      "input_source": "variable"
     }
   ],
   "outputs": [
@@ -85,7 +75,6 @@
       "label": "Matching Rows",
       "hint": "JSON array string of matching row objects, each keyed by header name.",
       "data_type": "string",
-      "script_alias": "matching_rows",
       "conflict_resolution": "overwrite",
       "create_field_options": false
     },
@@ -94,7 +83,6 @@
       "label": "Row Numbers",
       "hint": "JSON array string of the matching rows' real 1-indexed sheet row numbers (usable directly in Update Row/Cell).",
       "data_type": "string",
-      "script_alias": "row_numbers",
       "conflict_resolution": "overwrite",
       "create_field_options": false
     }
