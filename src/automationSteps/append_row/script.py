@@ -84,10 +84,16 @@ header_column = resolve_positive_int(getattr(inputs, "header_column", None), "he
 try:
     row_data = json.loads(inputs.row_data)
 except Exception as e:
-    raise Exception(f"row_data must be a valid JSON object string: {e}")
+    raise Exception(f"row_data must be a valid JSON object or array string: {e}")
 
-if not isinstance(row_data, dict):
-    raise Exception(f"row_data must be a JSON object (e.g. {{\"Name\": \"Jane\"}}), got: {inputs.row_data}")
+# A single object appends one row; an array of objects appends them all in one call.
+rows = row_data if isinstance(row_data, list) else [row_data]
+
+if not rows:
+    raise Exception("row_data is an empty array — nothing to append.")
+
+if not all(isinstance(row, dict) for row in rows):
+    raise Exception(f"row_data must be a JSON object (e.g. {{\"Name\": \"Jane\"}}) or an array of objects, got: {inputs.row_data}")
 
 quoted_sheet_name = a1_quote_sheet_name(sheet_name)
 
@@ -106,12 +112,15 @@ if header_column > len(header_row_values):
 
 headers = header_row_values[header_column - 1:]
 
-unknown_keys = [key for key in row_data if key not in headers]
+unknown_keys = sorted({key for row in rows for key in row if key not in headers})
 if unknown_keys:
     raise Exception(f"row_data has key(s) not found in sheet '{sheet_name}' headers: {unknown_keys}. Headers: {headers}")
 
 # A JSON null value is also treated as blank, same as a missing header — str(None) would otherwise write the literal text "None".
-ordered_values = [("" if (value := row_data.get(header)) is None else str(value)) for header in headers]
+ordered_values = [
+    [("" if (value := row.get(header)) is None else str(value)) for header in headers]
+    for row in rows
+]
 
 start_column_letter = column_number_to_letter(header_column)
 # Anchor at the header row itself — values.append finds the first empty row below it within this column range on its own.
@@ -121,14 +130,15 @@ append_url = (
     f"?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS"
 )
 
-append_resp = kizen.api.post(append_url, json={"values": [ordered_values]})
-append_body = check_sheets_response(append_resp, "appending row")
+append_resp = kizen.api.post(append_url, json={"values": ordered_values})
+append_body = check_sheets_response(append_resp, "appending rows")
 
-# Google decides where the row actually lands, so the real row number comes from its response, not a local guess.
+# Google decides where the rows actually land, so the first row number comes from its response, not a local guess. Rows are written as one contiguous block.
 updated_range = append_body.get("updates", {}).get("updatedRange", "")
 row_number_match = re.search(r"![A-Za-z]+(\d+)", updated_range)
 if not row_number_match:
     raise Exception(f"Could not determine the appended row number from Google's response (updatedRange: '{updated_range}').")
 
 outputs.row_number = int(row_number_match.group(1))
+outputs.rows_added = len(rows)
 outputs.spreadsheet_id = spreadsheet_id

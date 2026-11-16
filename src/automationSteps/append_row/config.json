@@ -1,6 +1,6 @@
 {
   "name": "Append Row",
-  "action_description": "Adds a new row to the end of a sheet, keyed by header name.",
+  "action_description": "Adds one or more rows to the end of a sheet, keyed by header name.",
   "runtime": "python-3-13",
   "script": "script.py",
   "inputs": [
@@ -22,8 +22,8 @@
     },
     {
       "name": "row_data",
-      "label": "Row Data",
-      "hint": "JSON object string keyed by header name, e.g. {\"Name\": \"Jane\", \"Email\": \"jane@example.com\"}. Headers not included default to blank; keys that aren't real headers raise an error.",
+      "label": "Row Data (JSON Object or Array)",
+      "hint": "JSON object string keyed by header name, e.g. {\"Name\": \"Jane\", \"Email\": \"jane@example.com\"}, or an array of these objects to append several rows in one call. Headers not included default to blank; keys that aren't real headers raise an error.",
       "data_type": "string",
       "required": true,
       "input_source": "variable"
@@ -49,7 +49,15 @@
     {
       "name": "row_number",
       "label": "Row Number",
-      "hint": "The real 1-indexed sheet row the new data landed on.",
+      "hint": "The real 1-indexed sheet row the first new row landed on. Rows are appended as one block, so later rows follow on consecutive row numbers.",
+      "data_type": "number",
+      "conflict_resolution": "overwrite",
+      "create_field_options": false
+    },
+    {
+      "name": "rows_added",
+      "label": "Rows Added",
+      "hint": "How many rows were appended.",
       "data_type": "number",
       "conflict_resolution": "overwrite",
       "create_field_options": false

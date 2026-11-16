@@ -1,7 +1,7 @@
 {
   "name": "Google Sheets",
   "api_name": "google_sheets",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Read, search, and write rows in Google Sheets from Kizen agentic workflows.",
   "categories": ["productivity_collaboration"],
   "agentic_description": "Integrates with Google Sheets to read, search, and write rows from Kizen agentic workflows.",
