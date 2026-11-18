@@ -2,7 +2,9 @@ import json
 import re
 from urllib.parse import quote
 
-BASE_URL = "/external-integrations/proxy/google_sheets/shared"
+# Preview builds publish under a suffixed api_name, so read it at runtime.
+plugin_name = kizen.app_data.plugin_app.api_name
+BASE_URL = f"/external-integrations/proxy/{plugin_name}/shared"
 
 # Kizen's longtext field type tops out around 50k characters — a single output over this would fail downstream anyway.
 MAX_OUTPUT_CHARS = 50000
