@@ -86,7 +86,7 @@ header_column = resolve_positive_int(getattr(inputs, "header_column", None), "he
 try:
     row_data = json.loads(inputs.row_data)
 except Exception as e:
-    raise Exception(f"row_data must be a valid JSON object or array string: {e}")
+    raise Exception(f"row_data must be a valid JSON object or JSON array: {e}")
 
 # A single object appends one row; an array of objects appends them all in one call.
 rows = row_data if isinstance(row_data, list) else [row_data]
