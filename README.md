@@ -14,7 +14,7 @@ Every action is a plain data-fetch/write primitive addressed by column header na
 | --- | --- |
 | **Get Rows / Read Range** | Fetch rows from a sheet, keyed by header name, with optional single-column filtering. |
 | **Search Rows** | Find row(s) by column value, using equals/not-equals/contains/starts-with/is-empty/is-not-empty matching; returns the matches and their real sheet row numbers. |
-| **Append Row** | Add a new row to a sheet, keyed by header name via a single JSON object. |
+| **Append Row(s)** | Add one or more rows to a sheet, keyed by header name via a JSON object or an array of objects. |
 | **Update Row/Cell** | Update specific cells within one row, targeted by row number or column match, without touching the rest of the row. |
 
 ## Authentication
@@ -63,16 +63,16 @@ Fetches the whole sheet, treats `header_row`/`header_column` as the top-left of 
 
 No matches returns empty arrays for both outputs rather than an error.
 
-### Append Row
+### Append Row(s)
 
 | Input | Required | Notes |
 | --- | --- | --- |
 | `spreadsheet_id`, `sheet_name`, `header_row`, `header_column` | — | Same as Get Rows/Search Rows. |
-| `row_data` | Yes | JSON object keyed by header name, e.g. `{"Name": "Jane"}`. Unknown keys raise an error; missing headers default to blank. |
+| `row_data` | Yes | JSON object keyed by header name, e.g. `{"Name": "Jane"}`, or an array of these objects to append several rows in one call. Unknown keys raise an error; missing headers default to blank. |
 
-**Outputs:** `row_number` (the real sheet row the data landed on, parsed from Google's response), `spreadsheet_id`.
+**Outputs:** `row_number` (the real sheet row the first new row landed on, parsed from Google's response), `rows_added` (how many rows were appended), `spreadsheet_id`. Later rows follow on consecutive row numbers.
 
-Single-row only — batch appends require multiple calls. Written with `valueInputOption=USER_ENTERED`, so values are interpreted the same way as typed input (e.g. `"3/4/1995"` becomes a real date).
+An array is appended as one contiguous block in a single API call. Written with `valueInputOption=USER_ENTERED`, so values are interpreted the same way as typed input (e.g. `"3/4/1995"` becomes a real date).
 
 ### Update Row/Cell
 
@@ -92,7 +92,7 @@ A partial update, not a full-row overwrite — only the columns named in `row_da
 ## Known Limitations
 
 - **No pagination.** Get Rows and Search Rows fetch the entire sheet in one call; very large sheets may be slow or approach response size limits.
-- **`row_data` values are interpreted like typed input, not stored literally.** Append Row and Update Row/Cell write with `valueInputOption=USER_ENTERED`, which behaves exactly like typing directly into a cell — this is what lets a date string become a real date, but it has two consequences worth knowing:
+- **`row_data` values are interpreted like typed input, not stored literally.** Append Row(s) and Update Row/Cell write with `valueInputOption=USER_ENTERED`, which behaves exactly like typing directly into a cell — this is what lets a date string become a real date, but it has two consequences worth knowing:
   - A numeric-looking string like `"00501"` (e.g. a zip code) becomes the number `501`, losing its leading zeros.
   - A string starting with `=` is executed as a live formula (confirmed: `"=1+1"` evaluates to `2`, not stored as text) — a real risk if `row_data` values can ever come from external or untrusted input flowing through a workflow, not just a display quirk.
 
