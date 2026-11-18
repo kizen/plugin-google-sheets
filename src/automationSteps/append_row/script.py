@@ -95,7 +95,7 @@ if not rows:
     raise Exception("row_data is an empty array — nothing to append.")
 
 if not all(isinstance(row, dict) for row in rows):
-    raise Exception(f"row_data must be a JSON object (e.g. {{\"Name\": \"Jane\"}}) or an array of objects, got: {inputs.row_data}")
+    raise Exception(f"row_data must be a JSON object (e.g. {{\"Name\": \"Jane\"}}) or a JSON array of objects, got: {inputs.row_data}")
 
 quoted_sheet_name = a1_quote_sheet_name(sheet_name)
 
