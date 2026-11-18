@@ -1,6 +1,6 @@
 {
   "name": "Append Row(s)",
-  "action_description": "Adds one or more rows to the end of a sheet. Row Data must be a JSON object or an array of JSON objects. Each object's keys must match the sheet's header names. A key that doesn't match a header causes an error, and no rows are added. Headers left out of an object are written as blank.",
+  "action_description": "Adds one or more rows below the data under the sheet's headers. The data ends at the first fully blank row, so if the sheet has one, new rows are inserted above it and the rows below shift down. Row Data must be a JSON object or an array of JSON objects. Each object's keys must match the sheet's header names. A key that doesn't match a header causes an error, and no rows are added. Headers left out of an object are written as blank.",
   "runtime": "python-3-13",
   "script": "script.py",
   "inputs": [
